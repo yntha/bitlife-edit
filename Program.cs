@@ -110,11 +110,11 @@ public class Program {
         string inputFile = args[0];
 
         if (inputFile.EndsWith(".data")) {
-            Console.Write("Enter the path to the Dummy DLL files: ");
+            Console.Write("Enter the path to the Mono DLL files: ");
             string? path = Console.ReadLine();
 
             if (string.IsNullOrEmpty(path)) {
-                Console.WriteLine("Invalid path to the Dummy DLL files.");
+                Console.WriteLine("Invalid path to the Mono DLL files.");
                 return;
             }
 
