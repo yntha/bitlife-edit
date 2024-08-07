@@ -1,9 +1,11 @@
 ﻿using System.Runtime.Serialization.Formatters.Binary;
 using System.Text.Json;
 using System.Text;
+using System.Reflection;
 
 public class Program {
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
+    private static string? assemblyPath = "";
     private static readonly Dictionary<int, int> obfCharMap = new() {
         {0x62, 0x6d}, {0x63, 0x79}, {0x64, 0x6c},
         {0x65, 0x78}, {0x66, 0x6b}, {0x67, 0x77},
@@ -93,11 +95,26 @@ public class Program {
         return JsonSerializer.Serialize(itemMap, new JsonSerializerOptions { WriteIndented = true });
     }
 
+    private static Assembly MonoAssemblyResolver(object? sender, ResolveEventArgs args) {
+        string? assemblyName = new AssemblyName(args.Name).Name;
+        string assemblyFilePath = Path.Combine(assemblyPath, assemblyName + ".dll");
+
+        if (File.Exists(assemblyFilePath)) {
+            return Assembly.LoadFrom(assemblyFilePath);
+        } else {
+            throw new FileNotFoundException("Assembly not found: " + assemblyFilePath);
+        }
+    }
+
     public static void Main(string[] args) {
         string inputFile = args[0];
 
         if (inputFile.EndsWith(".data")) {
-            // this is a serialized file with no encryption.
+            Console.Write("Enter the path to the Dummy DLL files: ");
+            assemblyPath = Console.ReadLine();
+
+            AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(MonoAssemblyResolver);
+
             object? deserialized = Deserialize(File.ReadAllBytes(inputFile));
 
             if (deserialized != null) {
