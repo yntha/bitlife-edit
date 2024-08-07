@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "bitlife-edit": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Users\\anthy\\Documents\\dev\\cs\\file.data\"",
+      "workingDirectory": "C:\\Users\\anthy\\Documents\\dev\\cs\\bitlife-edit"
+    }
+  }
+}
