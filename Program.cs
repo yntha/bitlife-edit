@@ -38,16 +38,10 @@ public class Program {
         StringBuilder decipheredItem = new();
         string b64DecodedItem = Encoding.UTF8.GetString(Convert.FromBase64String(b64Item));
         int i = 0;
-        int j = 0;
 
         while (i < b64DecodedItem.Length) {
-            if (j >= obfuscatedCipherKey.Length) {
-                j = 0;
-            }
-
-            decipheredItem.Append((char)(obfuscatedCipherKey[j] ^ b64DecodedItem[i]));
+            decipheredItem.Append((char)(obfuscatedCipherKey[i % obfuscatedCipherKey.Length] ^ b64DecodedItem[i]));
             i++;
-            j++;
         }
 
         return decipheredItem.ToString();
