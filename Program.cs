@@ -5,7 +5,7 @@ using System.Reflection;
 
 public class Program {
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
-    private static string? assemblyPath = "";
+    private static string assemblyPath = "";
     private static readonly Dictionary<int, int> obfCharMap = new() {
         {0x62, 0x6d}, {0x63, 0x79}, {0x64, 0x6c},
         {0x65, 0x78}, {0x66, 0x6b}, {0x67, 0x77},
@@ -111,7 +111,14 @@ public class Program {
 
         if (inputFile.EndsWith(".data")) {
             Console.Write("Enter the path to the Dummy DLL files: ");
-            assemblyPath = Console.ReadLine();
+            string? path = Console.ReadLine();
+
+            if (string.IsNullOrEmpty(path)) {
+                Console.WriteLine("Invalid path to the Dummy DLL files.");
+                return;
+            }
+
+            assemblyPath = path;
 
             AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(MonoAssemblyResolver);
 
