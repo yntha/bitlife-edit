@@ -132,15 +132,31 @@ public class Program
 
         StringBuilder varFile = new();
 
-        foreach (var item in itemMap)
+        foreach (var key in itemMap.Keys)
         {
-            string cipheredKey = GetCipheredItem(item.Key, obfuscatedCipherKey);
+            string cipheredKey = GetCipheredItem(key, obfuscatedCipherKey);
 
             // serialize the value to a byte array using binaryformatter
             using MemoryStream memoryStream = new();
+
+            // the formatter cant serialize jsonelement objects, so extract the value and serialize that
+            if (itemMap[key] is JsonElement jsonElement)
+            {
+#pragma warning disable CS8601 // Possible null reference assignment.
+                itemMap[key] = jsonElement.ValueKind switch
+                {
+                    JsonValueKind.String => jsonElement.GetString(),
+                    JsonValueKind.Number => jsonElement.TryGetInt64(out long l) ? l : jsonElement.GetDouble(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Object => jsonElement.EnumerateObject().ToDictionary(kv => kv.Name, kv => kv.Value),
+                    JsonValueKind.Array => jsonElement.EnumerateArray().ToList()
+                };
+#pragma warning restore CS8601 // Possible null reference assignment.
+            }
 #pragma warning disable SYSLIB0011 // Type or member is obsolete
             BinaryFormatter binaryFormatter = new();
-            binaryFormatter.Serialize(memoryStream, item.Value);
+            binaryFormatter.Serialize(memoryStream, itemMap[key]);
 #pragma warning restore SYSLIB0011 // Type or member is obsolete
             memoryStream.Position = 0;
 
@@ -255,7 +271,7 @@ public class Program
         JsonSerializerOptions jsonSerializerOptions = new()
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            Converters = { new SaveDataJSONConverter() },
+            Converters = { new SaveDataJSONConverter(options) },
             WriteIndented = true,
             IncludeFields = true
         };
