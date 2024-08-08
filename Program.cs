@@ -22,22 +22,22 @@ public class Program
         [Option('m', "mono", Required = false, HelpText = "The path to the Mono DLL files.")]
         public string? MonoDLLPath { get; set; }
 
-        [Option('d', "decrypt", Required = false, HelpText = "Decrypt the input file.")]
+        [Option('d', "decrypt", Required = false, HelpText = "Decrypt the input var file.")]
         public bool Decrypt { get; set; }
 
-        [Option('e', "encrypt", Required = false, HelpText = "Encrypt the input file.")]
+        [Option('e', "encrypt", Required = false, HelpText = "Encrypt the input var file.")]
         public bool Encrypt { get; set; }
 
         [Option('c', "cipher", Required = false, HelpText = "Overrides the default cipher key used to decrypt var files.")]
         public string? CipherKey { get; set; }
 
-        [Option('s', "save", Required = false, HelpText = "Dump the save game data to a JSON file.")]
+        [Option('s', "save", Required = false, HelpText = "Dump a .data file to a JSON file.")]
         public bool Save { get; set; }
 
-        [Option('l', "load", Required = false, HelpText = "Overwrite save game data based on variables stored in a JSON file.")]
-        public bool Load { get; set; }
+        [Option('p', "patch", Required = false, HelpText = "Patch any .data file based on variables stored in a JSON file.")]
+        public bool Patch { get; set; }
 
-        [Option('f', "file", Required = false, HelpText = "The JSON file to load data from.")]
+        [Option('f', "file", Required = false, HelpText = "The JSON file containing the variables required for a patch.")]
         public string? JSONFile { get; set; }
 
         [Option("max_depth", Required = false, HelpText = "The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).", Default = 0)]
@@ -417,7 +417,7 @@ public class Program
 
         if (options.Save) { DumpDataFile(); return; }
 
-        if (options.Load)
+        if (options.Patch)
         {
             if (options.MonoDLLPath == null)
             {
