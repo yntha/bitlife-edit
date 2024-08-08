@@ -42,6 +42,9 @@ public class Program
 
         [Option("max_depth", Required = false, HelpText = "The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).", Default = 0)]
         public int MaxDepth { get; set; }
+
+        [Option("data", Required = false, HelpText = "Dump the serialized .data file to a JSON file.")]
+        public bool Data { get; set; }
     };
 
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
@@ -389,6 +392,24 @@ public class Program
         }
     }
 
+    private static void DumpDataFile()
+    {
+        string json = File.ReadAllText(options.InputFile);
+        Dictionary<string, object>? itemMap = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+
+        if (itemMap == null)
+        {
+            Console.WriteLine("Invalid JSON file.");
+            return;
+        }
+
+        string outputFile = options.OutputFile ?? options.InputFile + ".json";
+
+        File.WriteAllText(outputFile, JsonSerializer.Serialize(itemMap, new JsonSerializerOptions { WriteIndented = true, IncludeFields = true }));
+
+        Console.WriteLine("Dumped data file to: " + outputFile);
+    }
+
     public static void Main(string[] args)
     {
         options = Parser.Default.ParseArguments<BitLifeEditOptions>(args).Value;
@@ -403,6 +424,10 @@ public class Program
             Console.WriteLine("No input file specified.");
             return;
         }
+
+
+
+        if (options.Data) { DumpDataFile(); return; }
 
         byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(4).ToArray();
 
