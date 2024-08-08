@@ -270,7 +270,7 @@ public class Program
         return (Life?)Deserialize(File.ReadAllBytes(inputFile));
     }
 
-    private static void OverwriteSaveGameValues()
+    private static void OverwriteDataFileValues(object deserializedData)
     {
         JsonSerializerOptions jsonSerializerOptions = new()
         {
@@ -279,9 +279,8 @@ public class Program
             WriteIndented = true,
             IncludeFields = true
         };
-        Life? deserialized = GetDeserializedSaveGame(options.InputFile);
 
-        if (deserialized != null)
+        if (deserializedData != null)
         {
             string json = File.ReadAllText(options.JSONFile!);
             Dictionary<string, object>? data = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
@@ -312,7 +311,7 @@ public class Program
                 // each item key may be encoded as an object path, so we need to traverse the object to find the field
                 // for example: "Finances.BankBalance" would be deserialized.Finances.BankBalance
                 string[] path = key.Split('.');
-                object? current = deserialized;
+                object? current = deserializedData;
 
                 for (int i = 0; i < path.Length - 1; i++)
                 {
@@ -353,7 +352,7 @@ public class Program
             using MemoryStream memoryStream = new();
 #pragma warning disable SYSLIB0011 // Type or member is obsolete
             BinaryFormatter binaryFormatter = new();
-            binaryFormatter.Serialize(memoryStream, deserialized);
+            binaryFormatter.Serialize(memoryStream, deserializedData);
 #pragma warning restore SYSLIB0011 // Type or member is obsolete
             File.WriteAllBytes(options.InputFile, memoryStream.ToArray());
 
@@ -362,6 +361,20 @@ public class Program
         else
         {
             Console.WriteLine("Failed to deserialize the input file. Serializer returned null.");
+        }
+    }
+
+    private static void OverwriteSaveGameValues()
+    {
+        object? deserialized = GetDeserializedSaveGame(options.InputFile);
+        
+        if (deserialized != null)
+        {
+            OverwriteDataFileValues(deserialized);
+        }
+        else
+        {
+            Console.WriteLine("Failed to deserialize the save game file. Serializer returned null.");
         }
     }
 
@@ -425,6 +438,7 @@ public class Program
             return;
         }
 
+        if (options.Save) { DumpSaveGame(); return; }
 
 
         if (options.Data) { DumpDataFile(); return; }
@@ -440,10 +454,6 @@ public class Program
 
             return;
         }
-
-        if (options.Save) { DumpSaveGame(); return; }
-
-        if (options.Load) { OverwriteSaveGameValues(); return; }
 
         if (options.Decrypt) { DecryptVarFile(); return; }
 
