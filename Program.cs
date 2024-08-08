@@ -10,7 +10,7 @@ using CommandLine;
 
 public class Program
 {
-    class BitLifeEditOptions
+    public class BitLifeEditOptions
     {
         [Value(0, MetaName = "input", Required = true, HelpText = "The input file to process.")]
         public required string InputFile { get; set; }
