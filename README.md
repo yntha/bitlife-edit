@@ -9,7 +9,13 @@ Download the latest release from the [releases page](https://github.com/yntha/bi
 ## Usage
 #### Dumping a save file
 ```sh
-bitlife-edit.exe -s saveFile.data
+bitlife-edit.exe -s saveFile.data -m dump/DummyDll
+```
+
+You can also dump any other file that is serialized in the same format as a save file. Typically, this means any .data file:
+
+```sh
+bitlife-edit.exe -s graves.data -m dump/DummyDll
 ```
 
 Note: Doing this requires the Mono assemblies for the game. To obtain them, you can use [Il2CppDumper](https://github.com/Perfare/Il2CppDumper) to generate dummy dlls. Once obtained, specify the path to the Mono DLLs using the `-m/--mono` flag.
@@ -70,27 +76,26 @@ In this case, the program will write the modified vars to `MonetizationVars`.
 
 #### All options
 ```
-bitlife-edit 1.0.0+5578a7d3e2c2d06bc692f10158e041d54939b7a6
+bitlife-edit 1.2.1+a1fa0f140879c34cc269a505efa2695eb0ac6c91
 Copyright (C) 2024 bitlife-edit
 
   -o, --output      The output file to write the JSON data to.
 
   -m, --mono        The path to the Mono DLL files.
 
-  -d, --decrypt     Decrypt the input file.
+  -d, --decrypt     Decrypt the input var file.
 
-  -e, --encrypt     Encrypt the input file.
+  -e, --encrypt     Encrypt the input var file.
 
   -c, --cipher      Overrides the default cipher key used to decrypt var files.
 
-  -s, --save        Dump the save game data to a JSON file.
+  -s, --save        Dump a .data file to a JSON file.
 
-  -l, --load        Overwrite save game data based on variables stored in a JSON file.
+  -p, --patch       Patch any .data file based on variables stored in a JSON file.
 
-  -f, --file        The JSON file to load data from.
+  -f, --file        The JSON file containing the variables required for a patch.
 
-  --max_depth       (Default: 0) The maximum depth to traverse when serializing the save game data. Default is 0 (no
-                    limit).
+  --max_depth       (Default: 0) The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).
 
   --help            Display this help screen.
 
