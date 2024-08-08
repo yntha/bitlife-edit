@@ -68,6 +68,37 @@ bitlife-edit.exe -l -f moneyvars.json MonetizationVars
 
 In this case, the program will write the modified vars to `MonetizationVars`.
 
+#### All options
+```
+bitlife-edit 1.0.0+5578a7d3e2c2d06bc692f10158e041d54939b7a6
+Copyright (C) 2024 bitlife-edit
+
+  -o, --output      The output file to write the JSON data to.
+
+  -m, --mono        The path to the Mono DLL files.
+
+  -d, --decrypt     Decrypt the input file.
+
+  -e, --encrypt     Encrypt the input file.
+
+  -c, --cipher      Overrides the default cipher key used to decrypt var files.
+
+  -s, --save        Dump the save game data to a JSON file.
+
+  -l, --load        Overwrite save game data based on variables stored in a JSON file.
+
+  -f, --file        The JSON file to load data from.
+
+  --max_depth       (Default: 0) The maximum depth to traverse when serializing the save game data. Default is 0 (no
+                    limit).
+
+  --help            Display this help screen.
+
+  --version         Display version information.
+
+  input (pos. 0)    Required. The input file to process.
+```
+
 ## Building
 To build the project, you will need to have [.NET Framework 8.0](https://dotnet.microsoft.com/download/dotnet/8.0) installed.
 It is recommended you use Visual Studio to build the project.
