@@ -453,51 +453,88 @@ public class SaveDataJSONConverter : JsonConverter<Life>
     }
 
     // recursively add all fields to a dictionary and return it
-    private Dictionary<string, object> Collect(object obj)
+    private Dictionary<string, object?> Collect(object obj)
     {
-        var props = obj.GetType()
-                             .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                             .ToDictionary(x => x.Name, x => x.GetValue(obj));
+        var stack = new Stack<(object obj, int depth, Dictionary<string, object?> container, string key)>();
+        var root = new Dictionary<string, object?>();
 
-        foreach (var prop in props)
+        // keep a log of already visited objects to prevent infinite loops
+        var visited = new HashSet<object>();
+
+        stack.Push((obj, 0, root, obj.GetType().Name));
+        visited.Add(obj);
+
+        while (stack.Count > 0)
         {
-            if (prop.Value != null)
+            var (currentObj, currentDepth, currentContainer, currentKey) = stack.Pop();
+
+            if (this.options.MaxDepth != 0 && currentDepth > this.options.MaxDepth)
             {
-                if (prop.Value is not IEnumerable && prop.Value.GetType().IsClass && prop.Value.GetType() != typeof(string))
+                currentContainer[currentKey] = new Dictionary<string, object> { { "MAXIMUM DEPTH REACHED", this.options.MaxDepth } };
+
+                continue;
+            }
+
+            var fields = currentObj.GetType()
+                                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                 .ToDictionary(x => x.Name, x => x.GetValue(currentObj));
+            var fieldContainer = currentKey == null ? currentContainer : new Dictionary<string, object?>();
+
+            if (currentKey != null) currentContainer[currentKey] = fieldContainer;
+
+            foreach (var field in fields)
+            {
+                if (field.Value != null)
                 {
-                    props[prop.Key] = Collect(prop.Value);
-                }
-                else
-                {
-                    // check if this is a collection
-                    if (prop.Value is IEnumerable enumerable && !(prop.Value is string))
+                    if (field.Value is not IEnumerable && field.Value.GetType().IsClass && field.Value.GetType() != typeof(string))
                     {
-                        Console.WriteLine("Found enumerable: " + prop.Key);
-                        Console.WriteLine("Type: " + prop.Value.GetType());
+                        if (visited.Contains(field.Value))
+                        {
+                            fieldContainer[field.Key] = new Dictionary<string, object> { { "CIRCULAR REFERENCE", field.Value.GetType().Name } };
+                            continue;
+                        }
+
+                        stack.Push((field.Value, currentDepth + 1, fieldContainer, field.Key));
+                        visited.Add(field.Value);
+                    }
+                    else if (field.Value is IEnumerable enumerable && !(field.Value is string))
+                    {
+                        Console.WriteLine("Found enumerable: " + field.Key);
+                        Console.WriteLine("Type: " + field.Value.GetType());
 
                         List<object> list = new();
 
                         foreach (var item in enumerable)
                         {
-                            if (item is string)
+                            if (item is string || !item.GetType().IsClass)
                             {
                                 list.Add(item);
                                 continue;
                             }
 
-                            list.Add(Collect(item));
+                            var listContainer = new Dictionary<string, object?>();
+
+                            list.Add(listContainer);
+
+                            if (visited.Contains(item))
+                            {
+                                listContainer["CIRCULAR REFERENCE"] = item.GetType().Name;
+                                continue;
+                            }
+
+                            stack.Push((item, currentDepth + 1, listContainer, ""));
+                            visited.Add(item);
                         }
 
-                        props[prop.Key] = list;
-
-                        continue;
+                        fieldContainer[field.Key] = list;
                     }
-
-                    props[prop.Key] = prop.Value;
+                    else {
+                        fieldContainer[field.Key] = field.Value;
+                    }
                 }
             }
         }
 
-        return props;
+        return root;
     }
 }
