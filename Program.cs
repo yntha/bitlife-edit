@@ -43,8 +43,6 @@ public class Program
         [Option("max_depth", Required = false, HelpText = "The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).", Default = 0)]
         public int MaxDepth { get; set; }
 
-        [Option("data", Required = false, HelpText = "Dump the serialized .data file to a JSON file.")]
-        public bool Data { get; set; }
     };
 
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
@@ -447,9 +445,8 @@ public class Program
             }
         }
 
-        if (options.Data) { DumpDataFile(); return; }
-
-        if (options.Decrypt) {
+        if (options.Decrypt)
+        {
             byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(4).ToArray();
 
             // check if this is a data file
@@ -461,9 +458,9 @@ public class Program
 
                 return;
             }
-            
+
             DecryptVarFile();
-            
+
             return;
         }
 
