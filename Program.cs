@@ -7,6 +7,7 @@ using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 using System.Collections;
 using CommandLine;
+using System.ComponentModel;
 
 public class Program
 {
@@ -394,6 +395,17 @@ public class Program
     public static void Main(string[] args)
     {
         options = Parser.Default.ParseArguments<BitLifeEditOptions>(args).Value;
+
+        if (options == null)
+        {
+            return;
+        }
+
+        if (options.InputFile == null)
+        {
+            Console.WriteLine("No input file specified.");
+            return;
+        }
 
         byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(8).ToArray();
 
