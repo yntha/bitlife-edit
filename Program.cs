@@ -364,20 +364,6 @@ public class Program
         }
     }
 
-    private static void OverwriteSaveGameValues()
-    {
-        object? deserialized = GetDeserializedSaveGame(options.InputFile);
-        
-        if (deserialized != null)
-        {
-            OverwriteDataFileValues(deserialized);
-        }
-        else
-        {
-            Console.WriteLine("Failed to deserialize the save game file. Serializer returned null.");
-        }
-    }
-
     private static void DumpSaveGame()
     {
         JsonSerializerOptions jsonSerializerOptions = new()
