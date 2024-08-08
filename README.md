@@ -62,17 +62,17 @@ $ bitlife-edit.exe --patch -f patch.json saveFile.data
 
 You can obtain the field names by dumping the save file first with the `-s/--save` flag.
 
-#### Dumping a var file
+#### Decrypting a var file
 ```sh
 bitlife-edit.exe -d MonetizationVars
 ```
 
-#### Editing a var file
+#### Encrypting a var file
 ```sh
 bitlife-edit.exe -e moneyvars.json
 ```
 
-In this case, the program will write the modified vars to `moneyvars.json.var`.
+In this case, the program will write the encrypted var file to `moneyvars.json.var`.
 
 #### All options
 ```
