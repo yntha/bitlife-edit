@@ -449,19 +449,23 @@ public class Program
 
         if (options.Data) { DumpDataFile(); return; }
 
-        byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(4).ToArray();
+        if (options.Decrypt) {
+            byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(4).ToArray();
 
-        // check if this is a save game file
-        if (fileHeader.SequenceEqual(saveGameHeader))
-        {
-            Console.WriteLine("Auto-detected a save game file. Actions will be limited to dumping only.");
+            // check if this is a save game file
+            if (fileHeader.SequenceEqual(saveGameHeader))
+            {
+                Console.WriteLine("Auto-detected a save game file. Actions will be limited to dumping only.");
 
-            DumpSaveGame();
+                DumpSaveGame();
 
+                return;
+            }
+            
+            DecryptVarFile();
+            
             return;
         }
-
-        if (options.Decrypt) { DecryptVarFile(); return; }
 
         if (options.Encrypt) { EncryptVarFile(); return; }
     }
