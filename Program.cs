@@ -457,7 +457,7 @@ public class Program
             {
                 Console.WriteLine("Auto-detected a save game file. Actions will be limited to dumping only.");
 
-                DumpSaveGame();
+                DumpDataFile();
 
                 return;
             }
