@@ -42,7 +42,6 @@ public class Program
 
         [Option("max_depth", Required = false, HelpText = "The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).", Default = 0)]
         public int MaxDepth { get; set; }
-
     };
 
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
@@ -362,47 +361,41 @@ public class Program
         }
     }
 
-    private static void DumpSaveGame()
-    {
-        JsonSerializerOptions jsonSerializerOptions = new()
-        {
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            Converters = { new SaveDataJSONConverter(options) },
-            WriteIndented = true,
-            IncludeFields = true
-        };
-        Life? deserialized = GetDeserializedSaveGame(options.InputFile);
-
-        if (deserialized != null)
-        {
-            string json = JsonSerializer.Serialize(deserialized, jsonSerializerOptions);
-            string unescaped = Regex.Unescape(json).Trim('"');
-            string outputFile = options.OutputFile ?? options.InputFile + ".json";
-
-            File.WriteAllText(outputFile, unescaped);
-
-            Console.WriteLine("Dumped save game data to: " + outputFile);
-        }
-        else
-        {
-            Console.WriteLine("Failed to deserialize the input file. Serializer returned null.");
-        }
-    }
-
     private static void DumpDataFile()
     {
-        string json = File.ReadAllText(options.InputFile);
-        Dictionary<string, object>? itemMap = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
-
-        if (itemMap == null)
+        if (options.MonoDLLPath == null)
         {
-            Console.WriteLine("Invalid JSON file.");
+            Console.WriteLine("The Mono DLL path is required to deserialize the data file.");
             return;
         }
 
-        string outputFile = options.OutputFile ?? options.InputFile + ".json";
+        AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(MonoAssemblyResolver);
 
-        File.WriteAllText(outputFile, JsonSerializer.Serialize(itemMap, new JsonSerializerOptions { WriteIndented = true, IncludeFields = true }));
+        object? deserialized = Deserialize(File.ReadAllBytes(options.InputFile));
+
+        if (deserialized == null)
+        {
+            Console.WriteLine("Failed to deserialize the data file. Serializer returned null.");
+            return;
+        }
+
+        JsonConverter converter = deserialized switch
+        {
+            Life => new DataFileJSONConverter<Life>(options),
+            _ => new DataFileJSONConverter<object>(options)
+        };
+
+        string outputFile = options.OutputFile ?? options.InputFile + ".json";
+        string json = JsonSerializer.Serialize(deserialized, new JsonSerializerOptions
+        {
+            Converters = { converter },
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = true,
+            IncludeFields = true
+        });
+        json = json.Replace("\\u003C", "<").Replace("\\u003E", ">");
+
+        File.WriteAllText(outputFile, json);
 
         Console.WriteLine("Dumped data file to: " + outputFile);
     }
@@ -422,9 +415,10 @@ public class Program
             return;
         }
 
-        if (options.Save) { DumpSaveGame(); return; }
+        if (options.Save) { DumpDataFile(); return; }
 
-        if (options.Load) {
+        if (options.Load)
+        {
             if (options.MonoDLLPath == null)
             {
                 Console.WriteLine("The Mono DLL path is required to deserialize the data files.");
