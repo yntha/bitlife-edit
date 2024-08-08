@@ -431,6 +431,13 @@ public class Program
 
 public class SaveDataJSONConverter : JsonConverter<Life>
 {
+    private readonly Program.BitLifeEditOptions options;
+
+    public SaveDataJSONConverter(Program.BitLifeEditOptions options) 
+    {
+        this.options = options;
+    }
+
     public override Life? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         throw new NotImplementedException();
