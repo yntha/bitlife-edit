@@ -440,6 +440,26 @@ public class Program
 
         if (options.Save) { DumpSaveGame(); return; }
 
+        if (options.Load) {
+            if (options.MonoDLLPath == null)
+            {
+                Console.WriteLine("The Mono DLL path is required to deserialize the data files.");
+                return;
+            }
+
+            AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(MonoAssemblyResolver);
+            object? deserialized = Deserialize(File.ReadAllBytes(options.InputFile));
+
+            if (deserialized != null)
+            {
+                OverwriteDataFileValues(deserialized);
+            }
+            else
+            {
+                Console.WriteLine("Failed to deserialize the data file. Serializer returned null.");
+                return;
+            }
+        }
 
         if (options.Data) { DumpDataFile(); return; }
 
