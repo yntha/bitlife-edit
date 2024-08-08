@@ -404,7 +404,7 @@ public class Program
             return;
         }
 
-        byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(8).ToArray();
+        byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(4).ToArray();
 
         // check if this is a save game file
         if (fileHeader.SequenceEqual(saveGameHeader))
