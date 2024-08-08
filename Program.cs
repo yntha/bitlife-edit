@@ -318,9 +318,6 @@ public class Program
                         break;
                     }
 
-                    Console.WriteLine("Path: " + path[i]);
-                    Console.WriteLine("Current: " + current.GetType().Name);
-
                     FieldInfo[] currentFields = current.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     FieldInfo? currentField = currentFields.FirstOrDefault(f => f.Name == path[i]);
 
@@ -499,9 +496,6 @@ public class SaveDataJSONConverter : JsonConverter<Life>
                     }
                     else if (field.Value is IEnumerable enumerable && !(field.Value is string))
                     {
-                        Console.WriteLine("Found enumerable: " + field.Key);
-                        Console.WriteLine("Type: " + field.Value.GetType());
-
                         List<object> list = new();
 
                         foreach (var item in enumerable)
