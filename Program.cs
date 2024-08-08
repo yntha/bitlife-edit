@@ -452,7 +452,7 @@ public class Program
         if (options.Decrypt) {
             byte[] fileHeader = File.ReadAllBytes(options.InputFile).Take(4).ToArray();
 
-            // check if this is a save game file
+            // check if this is a data file
             if (fileHeader.SequenceEqual(saveGameHeader))
             {
                 Console.WriteLine("Auto-detected a save game file. Actions will be limited to dumping only.");
