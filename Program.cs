@@ -288,17 +288,63 @@ public class Program
                 return;
             }
 
-            foreach (var item in data)
+            foreach (var key in data.Keys)
             {
-                FieldInfo? field = deserialized.GetType().GetField(item.Key);
+                if (data[key] is JsonElement jsonElement)
+                {
+#pragma warning disable CS8601 // Possible null reference assignment.
+                    data[key] = jsonElement.ValueKind switch
+                    {
+                        JsonValueKind.String => jsonElement.GetString(),
+                        JsonValueKind.Number => jsonElement.TryGetInt64(out long l) ? l : jsonElement.GetDouble(),
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        JsonValueKind.Object => jsonElement.EnumerateObject().ToDictionary(kv => kv.Name, kv => kv.Value),
+                        JsonValueKind.Array => jsonElement.EnumerateArray().ToList()
+                    };
+#pragma warning restore CS8601 // Possible null reference assignment.
+                }
+
+                // each item key may be encoded as an object path, so we need to traverse the object to find the field
+                // for example: "Finances.BankBalance" would be deserialized.Finances.BankBalance
+                string[] path = key.Split('.');
+                object? current = deserialized;
+
+                for (int i = 0; i < path.Length - 1; i++)
+                {
+                    if (current == null)
+                    {
+                        break;
+                    }
+
+                    Console.WriteLine("Path: " + path[i]);
+                    Console.WriteLine("Current: " + current.GetType().Name);
+
+                    FieldInfo[] currentFields = current.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo? currentField = currentFields.FirstOrDefault(f => f.Name == path[i]);
+
+                    if (currentField != null)
+                    {
+                        current = currentField.GetValue(current);
+                    }
+                    else
+                    {
+                        Console.WriteLine("Pathed field not found: " + path[i]);
+                        return;
+                    }
+                }
+
+                FieldInfo[] fields = current!.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo? field = fields.FirstOrDefault(f => f.Name == path[^1]);
 
                 if (field != null)
                 {
-                    field.SetValue(deserialized, item.Value);
+                    field.SetValue(current, data[key]);
                 }
                 else
                 {
-                    Console.WriteLine("Field not found: " + item.Key);
+                    Console.WriteLine("Field not found: " + path[^1]);
+                    return;
                 }
             }
 
@@ -306,7 +352,7 @@ public class Program
             using MemoryStream memoryStream = new();
 #pragma warning disable SYSLIB0011 // Type or member is obsolete
             BinaryFormatter binaryFormatter = new();
-            binaryFormatter.Serialize(memoryStream, data);
+            binaryFormatter.Serialize(memoryStream, deserialized);
 #pragma warning restore SYSLIB0011 // Type or member is obsolete
             File.WriteAllBytes(options.InputFile, memoryStream.ToArray());
 
@@ -323,7 +369,7 @@ public class Program
         JsonSerializerOptions jsonSerializerOptions = new()
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            Converters = { new SaveDataJSONConverter() },
+            Converters = { new SaveDataJSONConverter(options) },
             WriteIndented = true,
             IncludeFields = true
         };
@@ -332,7 +378,7 @@ public class Program
         if (deserialized != null)
         {
             string json = JsonSerializer.Serialize(deserialized, jsonSerializerOptions);
-            string unescaped = Regex.Unescape(json);
+            string unescaped = Regex.Unescape(json).Trim('"');
             string outputFile = options.OutputFile ?? options.InputFile + ".json";
 
             File.WriteAllText(outputFile, unescaped);
