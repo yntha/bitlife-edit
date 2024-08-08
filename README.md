@@ -23,7 +23,7 @@ Note: Doing this requires the Mono assemblies for the game. To obtain them, you 
 
 #### Editing a save file
 ```sh
-bitlife-edit.exe -l -f fields.json saveFile.data
+bitlife-edit.exe -p -f fields.json saveFile.data
 ```
 
 `fields.json` may be any JSON file with the following format:
@@ -57,7 +57,7 @@ $ cat patch.json
 {
     "<Finances>k__BackingField.<BankBalance>k__BackingField": 9999999999.0
 }
-$ bitlife-edit.exe -l -f patch.json saveFile.data
+$ bitlife-edit.exe --patch -f patch.json saveFile.data
 ```
 
 You can obtain the field names by dumping the save file first with the `-s/--save` flag.
@@ -69,10 +69,10 @@ bitlife-edit.exe -d MonetizationVars
 
 #### Editing a var file
 ```sh
-bitlife-edit.exe -l -f moneyvars.json MonetizationVars
+bitlife-edit.exe -e moneyvars.json
 ```
 
-In this case, the program will write the modified vars to `MonetizationVars`.
+In this case, the program will write the modified vars to `moneyvars.json.var`.
 
 #### All options
 ```
