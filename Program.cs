@@ -275,7 +275,7 @@ public class Program
         JsonSerializerOptions jsonSerializerOptions = new()
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            Converters = { new SaveDataJSONConverter(options) },
+            Converters = { new DataFileJSONConverter<object>(options) },
             WriteIndented = true,
             IncludeFields = true
         };
@@ -471,31 +471,35 @@ public class Program
     }
 }
 
-public class SaveDataJSONConverter : JsonConverter<Life>
+public class DataFileJSONConverter<T> : JsonConverter<T>
 {
     private readonly Program.BitLifeEditOptions options;
 
-    public SaveDataJSONConverter(Program.BitLifeEditOptions options) 
+    public DataFileJSONConverter(Program.BitLifeEditOptions options)
     {
         this.options = options;
     }
 
-    public override Life? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         throw new NotImplementedException();
     }
 
-    public override void Write(Utf8JsonWriter writer, Life value, JsonSerializerOptions options)
+    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
     {
         var props = this.Collect(value);
+        var opts = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            IncludeFields = true
+        };
+        var ser = JsonSerializer.Serialize(props, opts);
 
-        var ser = JsonSerializer.Serialize(props, options);
-
-        writer.WriteStringValue(ser);
+        writer.WriteRawValue(ser);
     }
 
     // recursively add all fields to a dictionary and return it
-    private Dictionary<string, object?> Collect(object obj)
+    private Dictionary<string, object?> Collect(T obj)
     {
         var stack = new Stack<(object obj, int depth, Dictionary<string, object?> container, string key)>();
         var root = new Dictionary<string, object?>();
@@ -503,7 +507,7 @@ public class SaveDataJSONConverter : JsonConverter<Life>
         // keep a log of already visited objects to prevent infinite loops
         var visited = new HashSet<object>();
 
-        stack.Push((obj, 0, root, obj.GetType().Name));
+        stack.Push(((object)obj!, 0, root, obj.GetType().Name));
         visited.Add(obj);
 
         while (stack.Count > 0)
@@ -542,6 +546,7 @@ public class SaveDataJSONConverter : JsonConverter<Life>
                     else if (field.Value is IEnumerable enumerable && !(field.Value is string))
                     {
                         List<object> list = new();
+                        int index = 0;
 
                         foreach (var item in enumerable)
                         {
@@ -561,13 +566,16 @@ public class SaveDataJSONConverter : JsonConverter<Life>
                                 continue;
                             }
 
-                            stack.Push((item, currentDepth + 1, listContainer, ""));
+                            stack.Push((item, currentDepth + 1, listContainer, index.ToString()));
                             visited.Add(item);
+
+                            index++;
                         }
 
                         fieldContainer[field.Key] = list;
                     }
-                    else {
+                    else
+                    {
                         fieldContainer[field.Key] = field.Value;
                     }
                 }
