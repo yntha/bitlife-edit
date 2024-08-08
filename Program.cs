@@ -38,6 +38,9 @@ public class Program
 
         [Option('f', "file", Required = false, HelpText = "The JSON file to load data from.")]
         public string? JSONFile { get; set; }
+
+        [Option("max_depth", Required = false, HelpText = "The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).", Default = 0)]
+        public int MaxDepth { get; set; }
     };
 
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
