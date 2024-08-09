@@ -536,11 +536,17 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
                     }
                     else if (field.Value is IEnumerable enumerable && !(field.Value is string))
                     {
-                        List<object> list = new();
+                        List<object?> list = new();
                         int index = 0;
 
                         foreach (var item in enumerable)
                         {
+                            if (item == null)
+                            {
+                                list.Add(null);
+                                continue;
+                            }
+
                             if (item is string || !item.GetType().IsClass)
                             {
                                 list.Add(item);
