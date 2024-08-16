@@ -100,6 +100,22 @@ public class Program
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(cipheredItem.ToString()));
     }
 
+    private static object ConvertJsonElement(JsonElement jsonElement)
+    {
+#pragma warning disable CS8603 // Possible null reference return.
+        return jsonElement.ValueKind switch
+        {
+            JsonValueKind.String => jsonElement.GetString(),
+            JsonValueKind.Number => jsonElement.TryGetInt64(out long l) ? l : jsonElement.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Object => jsonElement.EnumerateObject().ToDictionary(kv => kv.Name, kv => ConvertJsonElement(kv.Value)),
+            JsonValueKind.Array => jsonElement.EnumerateArray().Select(ConvertJsonElement).ToList(),
+            _ => null
+        };
+#pragma warning restore CS8603 // Possible null reference return.
+    }
+
     // encrypt the json file in inputFile to a var file
     private static void EncryptVarFile()
     {
@@ -143,18 +159,9 @@ public class Program
             // the formatter cant serialize jsonelement objects, so extract the value and serialize that
             if (itemMap[key] is JsonElement jsonElement)
             {
-#pragma warning disable CS8601 // Possible null reference assignment.
-                itemMap[key] = jsonElement.ValueKind switch
-                {
-                    JsonValueKind.String => jsonElement.GetString(),
-                    JsonValueKind.Number => jsonElement.TryGetInt64(out long l) ? l : jsonElement.GetDouble(),
-                    JsonValueKind.True => true,
-                    JsonValueKind.False => false,
-                    JsonValueKind.Object => jsonElement.EnumerateObject().ToDictionary(kv => kv.Name, kv => kv.Value),
-                    JsonValueKind.Array => jsonElement.EnumerateArray().ToList()
-                };
-#pragma warning restore CS8601 // Possible null reference assignment.
+                itemMap[key] = ConvertJsonElement(jsonElement);
             }
+
 #pragma warning disable SYSLIB0011 // Type or member is obsolete
             BinaryFormatter binaryFormatter = new();
             binaryFormatter.Serialize(memoryStream, itemMap[key]);
