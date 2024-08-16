@@ -299,17 +299,7 @@ public class Program
             {
                 if (data[key] is JsonElement jsonElement)
                 {
-#pragma warning disable CS8601 // Possible null reference assignment.
-                    data[key] = jsonElement.ValueKind switch
-                    {
-                        JsonValueKind.String => jsonElement.GetString(),
-                        JsonValueKind.Number => jsonElement.TryGetInt64(out long l) ? l : jsonElement.GetDouble(),
-                        JsonValueKind.True => true,
-                        JsonValueKind.False => false,
-                        JsonValueKind.Object => jsonElement.EnumerateObject().ToDictionary(kv => kv.Name, kv => kv.Value),
-                        JsonValueKind.Array => jsonElement.EnumerateArray().ToList()
-                    };
-#pragma warning restore CS8601 // Possible null reference assignment.
+                    data[key] = ConvertJsonElement(jsonElement);
                 }
 
                 // each item key may be encoded as an object path, so we need to traverse the object to find the field
