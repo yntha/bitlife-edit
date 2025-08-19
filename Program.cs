@@ -42,6 +42,9 @@ public class Program
 
         [Option("max_depth", Required = false, HelpText = "The maximum depth to traverse when serializing the save game data. Default is 0 (no limit).", Default = 0)]
         public int MaxDepth { get; set; }
+
+        [Option('r', "repl", Required = false, HelpText = "Start interactive REPL mode for editing save files.")]
+        public bool Repl { get; set; }
     };
 
     private const string DEFAULT_CIPHER_KEY = "com.wtfapps.apollo16";
@@ -62,7 +65,7 @@ public class Program
     private static readonly byte[] saveGameHeader = {
         0x00, 0x01, 0x00, 0x00
     };
-    private static BitLifeEditOptions options;
+    private static BitLifeEditOptions? options;
 
     private static object? Deserialize(byte[] inputData)
     {
@@ -119,7 +122,9 @@ public class Program
     // encrypt the json file in inputFile to a var file
     private static void EncryptVarFile()
     {
-        string json = File.ReadAllText(options.InputFile);
+        if (options == null) return;
+
+        string json = File.ReadAllText(options.InputFile!);
         Dictionary<string, object>? itemMap = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
 
         if (itemMap == null)
@@ -198,7 +203,9 @@ public class Program
 
     private static void DecryptVarFile()
     {
-        string[] fileLines = File.ReadAllLines(options.InputFile);
+        if (options == null) return;
+
+        string[] fileLines = File.ReadAllLines(options.InputFile!);
         Dictionary<string, object> itemMap = [];
 
         string obfuscatedCipherKey = "";
@@ -249,6 +256,8 @@ public class Program
 
     private static Assembly MonoAssemblyResolver(object? sender, ResolveEventArgs args)
     {
+        if (options == null) throw new InvalidOperationException("Options not initialized");
+
         string? assemblyName = new AssemblyName(args.Name).Name;
         string assemblyFilePath = Path.Combine(options.MonoDLLPath!, assemblyName + ".dll");
 
@@ -264,7 +273,7 @@ public class Program
 
     private static Life? GetDeserializedSaveGame(string inputFile)
     {
-        if (options.MonoDLLPath == null)
+        if (options?.MonoDLLPath == null)
         {
             Console.WriteLine("The Mono DLL path is required to deserialize the save game data.");
             return null;
@@ -276,6 +285,8 @@ public class Program
 
     private static void OverwriteDataFileValues(object deserializedData)
     {
+        if (options == null) return;
+
         JsonSerializerOptions jsonSerializerOptions = new()
         {
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -348,7 +359,7 @@ public class Program
             BinaryFormatter binaryFormatter = new();
             binaryFormatter.Serialize(memoryStream, deserializedData);
 #pragma warning restore SYSLIB0011 // Type or member is obsolete
-            File.WriteAllBytes(options.InputFile, memoryStream.ToArray());
+            File.WriteAllBytes(options.InputFile!, memoryStream.ToArray());
 
             Console.WriteLine("Overwrote save game data with values from: " + options.JSONFile);
         }
@@ -360,7 +371,7 @@ public class Program
 
     private static void DumpDataFile()
     {
-        if (options.MonoDLLPath == null)
+        if (options?.MonoDLLPath == null)
         {
             Console.WriteLine("The Mono DLL path is required to deserialize the data file.");
             return;
@@ -368,7 +379,7 @@ public class Program
 
         AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(MonoAssemblyResolver);
 
-        object? deserialized = Deserialize(File.ReadAllBytes(options.InputFile));
+        object? deserialized = Deserialize(File.ReadAllBytes(options.InputFile!));
 
         if (deserialized == null)
         {
@@ -395,6 +406,27 @@ public class Program
         File.WriteAllText(outputFile, json);
 
         Console.WriteLine("Dumped data file to: " + outputFile);
+    }
+
+    private static void StartRepl()
+    {
+        if (options?.MonoDLLPath == null)
+        {
+            Console.WriteLine("The Mono DLL path is required for REPL mode.");
+            return;
+        }
+
+        AppDomain.CurrentDomain.AssemblyResolve += new ResolveEventHandler(MonoAssemblyResolver);
+
+        object? saveData = Deserialize(File.ReadAllBytes(options.InputFile!));
+        if (saveData == null)
+        {
+            Console.WriteLine("Failed to load save file.");
+            return;
+        }
+
+        var repl = new BitLifeRepl(saveData, options);
+        repl.Run();
     }
 
     public static void Main(string[] args)
@@ -456,6 +488,12 @@ public class Program
         }
 
         if (options.Encrypt) { EncryptVarFile(); return; }
+
+        // launch repl if no other options are set
+        if (!options.Save && !options.Patch && !options.Decrypt && !options.Encrypt)
+        {
+            StartRepl();
+        }
     }
 }
 
@@ -494,9 +532,8 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
 
         // keep a log of already visited objects to prevent infinite loops
         var visited = new HashSet<object>();
-
-        stack.Push(((object)obj!, 0, root, obj.GetType().Name));
-        visited.Add(obj);
+        stack.Push(((object)obj!, 0, root, obj!.GetType().Name));
+        visited.Add(obj!);
 
         while (stack.Count > 0)
         {
@@ -578,4 +615,447 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
 
         return root;
     }
+}
+
+public class BitLifeRepl
+{
+    private readonly object saveData;
+    private readonly Program.BitLifeEditOptions options;
+    private readonly Dictionary<string, IReplCommand> commands;
+    private bool isRunning = true;
+
+    public BitLifeRepl(object saveData, Program.BitLifeEditOptions options)
+    {
+        this.saveData = saveData;
+        this.options = options;
+        this.commands = new Dictionary<string, IReplCommand>();
+
+        RegisterCommands();
+    }
+
+    private void RegisterCommands()
+    {
+        commands["set"] = new SetCommand();
+        commands["get"] = new GetCommand();
+        commands["show"] = new ShowCommand();
+        commands["help"] = new HelpCommand();
+        commands["save"] = new SaveCommand();
+        commands["quit"] = new QuitCommand();
+        commands["exit"] = new QuitCommand();
+    }
+
+    public void Run()
+    {
+        Console.WriteLine("==== BitLife Save Editor REPL ====");
+        Console.WriteLine("Type 'help' for available commands or 'quit' to exit.");
+        Console.WriteLine("Example: set money 99999");
+        Console.WriteLine();
+
+        while (isRunning)
+        {
+            Console.Write("bitlife> ");
+            string? input = Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrEmpty(input))
+                continue;
+
+            ProcessCommand(input);
+        }
+    }
+
+    private void ProcessCommand(string input)
+    {
+        try
+        {
+            string[] parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return;
+
+            string commandName = parts[0].ToLower();
+            string[] args = parts.Skip(1).ToArray();
+
+            if (commands.TryGetValue(commandName, out IReplCommand? command))
+            {
+                var context = new ReplContext(saveData, options, this);
+                command.Execute(context, args);
+            }
+            else
+            {
+                Console.WriteLine($"Unknown command: {commandName}. Type 'help' for available commands.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error executing command: {ex.Message}");
+        }
+    }
+
+    public void Stop()
+    {
+        isRunning = false;
+    }
+}
+
+public class ReplContext
+{
+    public object SaveData { get; }
+    public Program.BitLifeEditOptions Options { get; }
+    public BitLifeRepl Repl { get; }
+    private readonly List<IFieldHandler> fieldHandlers;
+
+    public ReplContext(object saveData, Program.BitLifeEditOptions options, BitLifeRepl repl)
+    {
+        SaveData = saveData;
+        Options = options;
+        Repl = repl;
+
+        // init field handlers
+        fieldHandlers = new List<IFieldHandler>
+        {
+            new MoneyFieldHandler()
+        };
+    }
+
+    public bool SetFieldByHandler(string fieldName, object value)
+    {
+        foreach (var handler in fieldHandlers)
+        {
+            if (handler.SupportedFields.Contains(fieldName.ToLower()))
+            {
+                return handler.TrySetField(this, fieldName, value);
+            }
+        }
+        return false;
+    }
+
+    public bool GetFieldByHandler(string fieldName, out object? value)
+    {
+        foreach (var handler in fieldHandlers)
+        {
+            if (handler.SupportedFields.Contains(fieldName.ToLower()))
+            {
+                return handler.TryGetField(this, fieldName, out value);
+            }
+        }
+        value = null;
+        return false;
+    }
+
+    public string[] GetSupportedFields()
+    {
+        return fieldHandlers.SelectMany(h => h.SupportedFields).ToArray();
+    }
+
+    public bool SetField(string fieldPath, object value)
+    {
+        try
+        {
+            string[] path = fieldPath.Split('.');
+            object? current = SaveData;
+
+            // nav to parent object
+            for (int i = 0; i < path.Length - 1; i++)
+            {
+                if (current == null) return false;
+
+                FieldInfo[] currentFields = current.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo? currentField = currentFields.FirstOrDefault(f => f.Name == path[i]);
+
+                if (currentField != null)
+                {
+                    current = currentField.GetValue(current);
+                }
+                else
+                {
+                    currentField = currentFields.FirstOrDefault(f => f.Name.Contains(path[i], StringComparison.OrdinalIgnoreCase));
+                    if (currentField != null)
+                    {
+                        current = currentField.GetValue(current);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Field not found: {path[i]}");
+                        return false;
+                    }
+                }
+            }
+
+            // Set the final field
+            if (current != null)
+            {
+                FieldInfo[] fields = current.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo? field = fields.FirstOrDefault(f => f.Name == path[^1]);
+
+                if (field == null)
+                {
+                    field = fields.FirstOrDefault(f => f.Name.Contains(path[^1], StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (field != null)
+                {
+                    // convert value to the correct type
+                    object convertedValue = Convert.ChangeType(value, field.FieldType);
+                    field.SetValue(current, convertedValue);
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine($"Field not found: {path[^1]}");
+                    return false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error setting field: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    public object? GetField(string fieldPath)
+    {
+        try
+        {
+            string[] path = fieldPath.Split('.');
+            object? current = SaveData;
+
+            foreach (string component in path)
+            {
+                if (current == null) return null;
+
+                FieldInfo[] fields = current.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo? field = fields.FirstOrDefault(f => f.Name == component);
+
+                if (field == null)
+                {
+                    field = fields.FirstOrDefault(f => f.Name.Contains(component, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (field != null)
+                {
+                    current = field.GetValue(current);
+                }
+                else
+                {
+                    return null;
+                }
+            }
+
+            return current;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+public interface IFieldHandler
+{
+    string[] SupportedFields { get; }
+    bool TryGetField(ReplContext context, string fieldName, out object? value);
+    bool TrySetField(ReplContext context, string fieldName, object value);
+    string GetDescription(string fieldName);
+}
+
+public class MoneyFieldHandler : IFieldHandler
+{
+    public static readonly string FieldName = "<Finances>k__BackingField.<BankBalance>k__BackingField";
+    public string[] SupportedFields => new[] { "money", "cash", "bank", "balance" };
+
+    public bool TryGetField(ReplContext context, string fieldName, out object? value)
+    {
+        value = context.GetField(FieldName);
+        return value != null;
+    }
+
+    public bool TrySetField(ReplContext context, string fieldName, object value)
+    {
+        return context.SetField(FieldName, value);
+    }
+
+    public string GetDescription(string fieldName)
+    {
+        return "Character's money/bank balance";
+    }
+}
+
+public interface IReplCommand
+{
+    void Execute(ReplContext context, string[] args);
+    string GetHelp();
+}
+
+public class SetCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.WriteLine("Usage: set <field> <value>");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  set money 99999");
+            return;
+        }
+
+        string fieldName = args[0].ToLower();
+        string valueStr = args[1];
+
+        if (TryParseValue(valueStr, out object? value) && value != null)
+        {
+            if (context.SetFieldByHandler(fieldName, value))
+            {
+                Console.WriteLine($"Set {fieldName} to: {value}");
+            }
+            else
+            {
+                Console.WriteLine($"Could not find or set field: {fieldName}");
+                Console.WriteLine("Try 'help' to see supported fields.");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Invalid value: {valueStr}");
+        }
+    }
+
+    private bool TryParseValue(string valueStr, out object? value)
+    {
+        value = null;
+
+        // Try parsing as different types
+        if (long.TryParse(valueStr, out long longValue))
+        {
+            value = longValue;
+            return true;
+        }
+
+        if (double.TryParse(valueStr, out double doubleValue))
+        {
+            value = doubleValue;
+            return true;
+        }
+
+        if (bool.TryParse(valueStr, out bool boolValue))
+        {
+            value = boolValue;
+            return true;
+        }
+
+        // Default to string
+        value = valueStr;
+        return true;
+    }
+
+    public string GetHelp() => "set <field> <value> - Set a field to a specific value";
+}
+
+public class GetCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.WriteLine("Usage: get <field>");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  get money");
+            return;
+        }
+
+        string fieldName = args[0].ToLower();
+
+        if (context.GetFieldByHandler(fieldName, out object? value))
+        {
+            Console.WriteLine($"{fieldName}: {value}");
+        }
+        else
+        {
+            Console.WriteLine($"Field '{fieldName}' not found or has no value.");
+            Console.WriteLine("Try 'help' to see supported fields.");
+        }
+    }
+
+    public string GetHelp() => "get <field> - Get the current value of a field";
+}
+
+public class ShowCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        Console.WriteLine("=== Current Character Stats ===");
+
+        string[] statsToShow = {
+            MoneyFieldHandler.FieldName,
+        };
+
+        foreach (string stat in statsToShow)
+        {
+            var value = context.GetField(stat);
+            if (value != null)
+            {
+                Console.WriteLine($"{stat}: {value}");
+            }
+        }
+    }
+
+    public string GetHelp() => "show - Display current character statistics";
+}
+
+public class SaveCommand : IReplCommand
+{    public void Execute(ReplContext context, string[] args)
+    {
+        try
+        {
+            using MemoryStream memoryStream = new();
+#pragma warning disable SYSLIB0011
+            BinaryFormatter binaryFormatter = new();
+            binaryFormatter.Serialize(memoryStream, context.SaveData);
+#pragma warning restore SYSLIB0011
+
+            string outputFile = args.Length > 0 ? args[0] : context.Options.InputFile!;
+            File.WriteAllBytes(outputFile, memoryStream.ToArray());
+
+            Console.WriteLine($"Save file written to: {outputFile}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving file: {ex.Message}");
+        }
+    }
+
+    public string GetHelp() => "save [filename] - Save changes to file";
+}
+
+public class HelpCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        Console.WriteLine("Available commands:");
+        Console.WriteLine("  set <field> <value> - Set a field to a specific value");
+        Console.WriteLine("  get <field>         - Get the current value of a field");
+        Console.WriteLine("  show                - Display current character stats");
+        Console.WriteLine("  save [filename]     - Save changes to file");
+        Console.WriteLine("  help                - Show this help message");
+        Console.WriteLine("  quit/exit           - Exit the REPL");
+        Console.WriteLine();
+        Console.WriteLine("Supported fields:");
+        Console.WriteLine("  money, cash, bank, balance - Character's money");
+        Console.WriteLine();
+        Console.WriteLine("Examples:");
+        Console.WriteLine("  set money 99999     - Set money to 99,999");
+        Console.WriteLine("  show                - Display all stats");
+    }
+
+    public string GetHelp() => "help - Show available commands";
+}
+
+public class QuitCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        Console.WriteLine("Exiting REPL...");
+        context.Repl.Stop();
+    }
+
+    public string GetHelp() => "quit - Exit the REPL";
 }
