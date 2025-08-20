@@ -7,6 +7,39 @@ A simple tool to edit/dump BitLife save files or var files.
 Download the latest release from the [releases page](https://github.com/yntha/bitlife-edit/releases) or [build](#building) the project yourself.
 
 ## Usage
+#### The Save Editor
+bitlife-edit comes with a REPL that allows you to edit save files interactively. To start it, run:
+```sh
+bitlife-edit.exe -r -m <mono dll path> <saveFile.data>
+```
+The REPL also launches automatically if you run the program without any arguments:
+```sh
+bitlife-edit.exe -m <mono dll path> <saveFile.data>
+==== BitLife Save Editor REPL ====
+Type 'help' for available commands or 'quit' to exit.
+Example: set money 99999
+
+bitlife>
+```
+Run the `help` command to see a list of available commands:
+```sh
+bitlife> help
+Available commands:
+  set <field> <value> - Set a field to a specific value
+  get <field>         - Get the current value of a field
+  show                - Display current character stats
+  save [filename]     - Save changes to file. Must be used before exiting.
+  help                - Show this help message
+  quit/exit           - Exit the REPL
+
+Supported fields:
+  money, cash, bank, balance - Character's money
+
+Examples:
+  set bank 99999      - Set money to 99,999
+  show                - Display all stat
+```
+
 #### Dumping a save file
 ```sh
 bitlife-edit.exe -s saveFile.data -m dump/DummyDll
