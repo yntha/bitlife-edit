@@ -4,7 +4,7 @@ A simple tool to edit/dump BitLife save files or var files.
 
 ## Installation
 
-Download the latest release from the [releases page](https://github.com/yntha/bitlife-edit/releases) or [build](#building) the project yourself.
+Download the latest release from the [releases page](https://github.com/yntha/bitlife-edit/releases) or [build](#building) the project yourself. <b>NOTE!!!:</b> You will need to rebuild the project with the Mono DLLs from that game version to ensure compatibility or else you will run into deserialization issues.
 
 ## Usage
 #### The Save Editor
