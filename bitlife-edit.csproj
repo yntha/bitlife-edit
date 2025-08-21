@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
-      <HintPath>..\dump\DummyDll\Assembly-CSharp.dll</HintPath>
+      <HintPath>..\dump\3.19.9\Assembly-CSharp.dll</HintPath>
     </Reference>
   </ItemGroup>
 
