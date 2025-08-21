@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Collections;
 using CommandLine;
 using System.ComponentModel;
+using System.Runtime.Serialization;
 
 public class Program
 {
@@ -65,9 +66,7 @@ public class Program
     private static readonly byte[] saveGameHeader = {
         0x00, 0x01, 0x00, 0x00
     };
-    private static BitLifeEditOptions? options;
-
-    private static object? Deserialize(byte[] inputData)
+    private static BitLifeEditOptions? options;    private static object? Deserialize(byte[] inputData)
     {
         object? deserialized = null;
 
@@ -77,9 +76,24 @@ public class Program
 
 #pragma warning disable SYSLIB0011
             BinaryFormatter binaryFormatter = new();
+            binaryFormatter.SurrogateSelector = new PermissiveSurrogateSelector();
+            binaryFormatter.Binder = new PermissiveSerializationBinder();
 #pragma warning restore SYSLIB0011
-
             deserialized = binaryFormatter.Deserialize(memoryStream);
+        }
+        catch (SerializationException ex) when (ex.InnerException is InvalidCastException)
+        {
+            Console.WriteLine("Serialization error encountered. Attempting fallback deserialization...");
+
+            try
+            {
+                deserialized = DeserializeWithPermissiveSettings(inputData);
+            }
+            catch (Exception fallbackEx)
+            {
+                Console.WriteLine($"Fallback deserialization also failed: {fallbackEx.Message}");
+                throw;
+            }
         }
         catch (Exception e)
         {
@@ -87,6 +101,19 @@ public class Program
         }
 
         return deserialized;
+    }
+
+    private static object? DeserializeWithPermissiveSettings(byte[] inputData)
+    {
+        using MemoryStream memoryStream = new(inputData);
+
+#pragma warning disable SYSLIB0011
+        BinaryFormatter binaryFormatter = new();
+        binaryFormatter.SurrogateSelector = new DebuggingSurrogateSelector();
+        binaryFormatter.Binder = new PermissiveSerializationBinder();
+#pragma warning restore SYSLIB0011
+
+        return binaryFormatter.Deserialize(memoryStream);
     }
 
     private static string GetCipheredItem(string item, string obfuscatedCipherKey)
@@ -532,6 +559,9 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
 
         // keep a log of already visited objects to prevent infinite loops
         var visited = new HashSet<object>();
+        var circularReferenceCount = new Dictionary<object, int>();
+        const int maxCircularReferences = 100;
+
         stack.Push(((object)obj!, 0, root, obj!.GetType().Name));
         visited.Add(obj!);
 
@@ -561,12 +591,25 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
                     {
                         if (visited.Contains(field.Value))
                         {
-                            fieldContainer[field.Key] = new Dictionary<string, object> { { "CIRCULAR REFERENCE", field.Value.GetType().Name } };
+                            circularReferenceCount.TryGetValue(field.Value, out int count);
+                            count++;
+                            circularReferenceCount[field.Value] = count;
+
+                            if (count <= maxCircularReferences)
+                            {
+                                stack.Push((field.Value, currentDepth + 1, fieldContainer, field.Key));
+                            }
+                            else
+                            {
+                                // halt further traversal and indicate circular reference
+                                fieldContainer[field.Key] = new Dictionary<string, object> { { "CIRCULAR_REFERENCE", field.Value.GetType().Name } };
+                            }
                             continue;
                         }
 
                         stack.Push((field.Value, currentDepth + 1, fieldContainer, field.Key));
                         visited.Add(field.Value);
+                        circularReferenceCount[field.Value] = 0;
                     }
                     else if (field.Value is IEnumerable enumerable && !(field.Value is string))
                     {
@@ -588,17 +631,29 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
                             }
 
                             var listContainer = new Dictionary<string, object?>();
-
                             list.Add(listContainer);
 
                             if (visited.Contains(item))
                             {
-                                listContainer["CIRCULAR REFERENCE"] = item.GetType().Name;
+                                circularReferenceCount.TryGetValue(item, out int count);
+                                count++;
+                                circularReferenceCount[item] = count;
+
+                                if (count <= maxCircularReferences)
+                                {
+                                    stack.Push((item, currentDepth + 1, listContainer, index.ToString()));
+                                }
+                                else
+                                {
+                                    listContainer["CIRCULAR_REFERENCE"] = item.GetType().Name;
+                                }
+                                index++;
                                 continue;
                             }
 
                             stack.Push((item, currentDepth + 1, listContainer, index.ToString()));
                             visited.Add(item);
+                            circularReferenceCount[item] = 0;
 
                             index++;
                         }
@@ -1059,3 +1114,149 @@ public class QuitCommand : IReplCommand
 
     public string GetHelp() => "quit - Exit the REPL";
 }
+
+#pragma warning disable SYSLIB0050 // Type or member is obsolete
+public class LifeSerializationSurrogate : ISerializationSurrogate
+{
+    public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
+    {
+        throw new NotImplementedException();
+    }
+
+    public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector? selector)
+    {
+        var life = (Life)obj;
+        var fields = typeof(Life).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+        foreach (var field in fields)
+        {
+            try
+            {
+                var value = info.GetValue(field.Name, field.FieldType);
+                field.SetValue(life, value);
+            }
+            catch (InvalidCastException ex) when (ex.Message.Contains("IConvertible"))
+            {
+                Console.WriteLine($"Skipping problematic field: {field.Name} of type {field.FieldType}");
+
+                if (field.FieldType.IsGenericType && field.FieldType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+                {
+                    HandleProblematicDictionary(life, field, info);
+                }
+                else
+                {
+                    field.SetValue(life, GetDefaultValue(field.FieldType));
+                }
+            }
+            catch (Exception ex)
+            {
+                field.SetValue(life, GetDefaultValue(field.FieldType));
+            }
+        }
+
+        return life;
+    }
+
+    private void HandleProblematicDictionary(Life life, FieldInfo field, SerializationInfo info)
+    {
+        try
+        {
+            var dictType = field.FieldType;
+            var emptyDict = Activator.CreateInstance(dictType);
+            field.SetValue(life, emptyDict);
+
+            Console.WriteLine($"Set {field.Name} to empty dictionary due to serialization issues");
+        }
+        catch (Exception ex)
+        {
+            field.SetValue(life, null);
+        }
+    }
+
+    private object? GetDefaultValue(Type type)
+    {
+        if (type.IsValueType)
+        {
+            return Activator.CreateInstance(type);
+        }
+        return null;
+    }
+}
+
+// Generic dictionary surrogate for other problematic dictionaries
+public class GenericDictionarySurrogate : ISerializationSurrogate
+{
+    public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
+    {
+        throw new NotImplementedException();
+    }
+
+    public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector? selector)
+    {
+        var dictType = obj.GetType();
+
+        try
+        {
+            var emptyDict = Activator.CreateInstance(dictType);
+            return emptyDict ?? obj;
+        }
+        catch
+        {
+            return obj;
+        }
+    }
+}
+
+// permissive surrogate selector for fallback deserialization
+public class PermissiveSurrogateSelector : ISurrogateSelector
+{
+    public void ChainSelector(ISurrogateSelector selector) { }
+    public ISurrogateSelector? GetNextSelector() => null;    public ISerializationSurrogate? GetSurrogate(Type type, StreamingContext context, out ISurrogateSelector selector)
+    {
+        selector = null!;
+
+        if (type == typeof(Life))
+        {
+            return new LifeSerializationSurrogate();
+        }
+
+        // using a generic surrogate for all dictionary types to avoid IConvertible issues
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+        {
+            return new GenericDictionarySurrogate();
+        }
+
+        return null;
+    }
+}
+
+public class PermissiveSerializationBinder : SerializationBinder
+{
+    public override Type? BindToType(string assemblyName, string typeName)
+    {
+        // Console.WriteLine($"Binding: {assemblyName} -> {typeName}");
+        return null;
+    }
+}
+
+public class DebuggingSurrogateSelector : ISurrogateSelector
+{
+    public void ChainSelector(ISurrogateSelector selector) { }
+    public ISurrogateSelector? GetNextSelector() => null;    public ISerializationSurrogate? GetSurrogate(Type type, StreamingContext context, out ISurrogateSelector selector)
+    {
+        selector = null!;
+        //Console.WriteLine($"Deserializing type: {type.FullName}");
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+        {
+            var keyType = type.GetGenericArguments()[0];
+            var valueType = type.GetGenericArguments()[1];
+            // Console.WriteLine($"  Dictionary<{keyType.FullName}, {valueType.FullName}>");
+            // Console.WriteLine($"  Key type implements IConvertible: {typeof(IConvertible).IsAssignableFrom(keyType)}");
+            // Console.WriteLine($"  Value type implements IConvertible: {typeof(IConvertible).IsAssignableFrom(valueType)}");
+        }
+
+        return null;
+    }
+}
+#pragma warning restore SYSLIB0050
