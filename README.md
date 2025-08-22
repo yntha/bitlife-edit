@@ -8,7 +8,7 @@ Download the latest release from the [releases page](https://github.com/yntha/bi
 
 ## Usage
 #### The Save Editor
-bitlife-edit comes with a REPL that allows you to edit save files interactively. To start it, run:
+bitlife-edit comes with a REPL that allows you to edit save files interactively. With the save editor, you are also able to edit values that aren't normally accessible in the dump, like your age. To start it, run:
 ```sh
 bitlife-edit.exe -r -m <mono dll path> <saveFile.data>
 ```
