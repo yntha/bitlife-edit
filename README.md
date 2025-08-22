@@ -27,7 +27,6 @@ bitlife> help
 Available commands:
   set <field> <value> - Set a field to a specific value
   get <field>         - Get the current value of a field
-  show                - Display current character stats
   save [filename]     - Save changes to file
   help                - Show this help message
   quit/exit           - Exit the REPL
@@ -40,7 +39,6 @@ Examples:
   set money 99999     - Set money to 99,999
   get money           - Get current money value
   set age 30          - Set age to 30
-  show                - Display all stats
 ```
 
 #### Dumping a save file

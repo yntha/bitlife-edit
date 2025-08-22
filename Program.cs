@@ -699,7 +699,6 @@ public class BitLifeRepl
     {
         commands["set"] = new SetCommand();
         commands["get"] = new GetCommand();
-        commands["show"] = new ShowCommand();
         commands["help"] = new HelpCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
@@ -806,6 +805,11 @@ public class ReplContext
     public string[] GetSupportedFields()
     {
         return fieldHandlers.SelectMany(h => h.SupportedFields).ToArray();
+    }
+
+    public List<IFieldHandler> GetFieldHandlers()
+    {
+        return fieldHandlers;
     }
 
     public bool SetField(string fieldPath, object value)
@@ -923,18 +927,32 @@ public interface IFieldHandler
 
 public class MoneyFieldHandler : IFieldHandler
 {
-    public static readonly string FieldName = "<Finances>k__BackingField.<BankBalance>k__BackingField";
     public string[] SupportedFields => new[] { "money", "cash", "bank", "balance" };
 
     public bool TryGetField(ReplContext context, string fieldName, out object? value)
     {
-        value = context.GetField(FieldName);
+        SimFinances val = context.SaveData.Finances;
+        if (val is not null)
+        {
+            value = val.BankBalance;
+        }
+        else
+        {
+            value = null;
+        }
         return value != null;
     }
 
     public bool TrySetField(ReplContext context, string fieldName, object value)
     {
-        return context.SetField(FieldName, value);
+        SimFinances val = context.SaveData.Finances;
+        if (val is not null)
+        {
+            val.BankBalance = Convert.ToInt64(value);
+            return true;
+        }
+
+        return false;
     }
 
     public string GetDescription(string fieldName)
@@ -968,15 +986,12 @@ public class AgeFieldHandler : IFieldHandler
             val.Age = Convert.ToInt32(value);
             return true;
         }
-        else
-        {
-            return false;
-        }
+        return false;
     }
 
     public string GetDescription(string fieldName)
     {
-        return "Character's money/bank balance";
+        return "Character's age";
     }
 }
 
@@ -1078,29 +1093,6 @@ public class GetCommand : IReplCommand
     public string GetHelp() => "get <field> - Get the current value of a field";
 }
 
-public class ShowCommand : IReplCommand
-{
-    public void Execute(ReplContext context, string[] args)
-    {
-        Console.WriteLine("=== Current Character Stats ===");
-
-        string[] statsToShow = {
-            MoneyFieldHandler.FieldName,
-        };
-
-        foreach (string stat in statsToShow)
-        {
-            var value = context.GetField(stat);
-            if (value != null)
-            {
-                Console.WriteLine($"{stat}: {value}");
-            }
-        }
-    }
-
-    public string GetHelp() => "show - Display current character statistics";
-}
-
 public class SaveCommand : IReplCommand
 {    public void Execute(ReplContext context, string[] args)
     {
@@ -1133,7 +1125,6 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Available commands:");
         Console.WriteLine("  set <field> <value> - Set a field to a specific value");
         Console.WriteLine("  get <field>         - Get the current value of a field");
-        Console.WriteLine("  show                - Display current character stats");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1146,7 +1137,6 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  set money 99999     - Set money to 99,999");
         Console.WriteLine("  get money           - Get current money value");
         Console.WriteLine("  set age 30          - Set age to 30");
-        Console.WriteLine("  show                - Display all stats");
     }
 
     public string GetHelp() => "help - Show available commands";
