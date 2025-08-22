@@ -66,9 +66,7 @@ public class Program
     private static readonly byte[] saveGameHeader = {
         0x00, 0x01, 0x00, 0x00
     };
-    private static BitLifeEditOptions? options;
-
-    private static object? Deserialize(byte[] inputData)
+    private static BitLifeEditOptions? options;    private static object? Deserialize(byte[] inputData)
     {
         object? deserialized = null;
 
@@ -100,7 +98,6 @@ public class Program
         catch (Exception e)
         {
             Console.WriteLine("Deserializer Error: " + e.Message);
-            throw;
         }
 
         return deserialized;
@@ -411,6 +408,24 @@ public class Program
 
         object? deserialized = Deserialize(File.ReadAllBytes(options.InputFile!));
 
+        // print the type of Life.<Hero>k__BackingField
+        Console.WriteLine("Type of Life.<Hero>k__BackingField: " + deserialized?.GetType().GetField("<Hero>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)?.FieldType);
+        // print all fields of SimHero after casting the field to SimPerson
+        Console.WriteLine("Fields of SimHero:");
+        SimPerson? hero = (SimPerson?)deserialized?.GetType().GetField("<Hero>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(deserialized);
+        if (hero != null)
+        {
+            FieldInfo[] heroFields = hero.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+            foreach (var field in heroFields)
+            {
+                Console.WriteLine($"{field.Name}: {field.GetValue(hero)}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("Hero is null.");
+        }
+
         if (deserialized == null)
         {
             Console.WriteLine("Failed to deserialize the data file. Serializer returned null.");
@@ -699,7 +714,6 @@ public class BitLifeRepl
     {
         commands["set"] = new SetCommand();
         commands["get"] = new GetCommand();
-        commands["show"] = new ShowCommand();
         commands["help"] = new HelpCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
@@ -848,6 +862,8 @@ public class ReplContext
                 FieldInfo[] fields = current.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 FieldInfo? field = fields.FirstOrDefault(f => f.Name == path[^1]);
 
+                Console.WriteLine($"Fields: {string.Join(", ", fields.Select(f => f.Name))}");
+
                 if (field == null)
                 {
                     field = fields.FirstOrDefault(f => f.Name.Contains(path[^1], StringComparison.OrdinalIgnoreCase));
@@ -923,18 +939,18 @@ public interface IFieldHandler
 
 public class MoneyFieldHandler : IFieldHandler
 {
-    public static readonly string FieldName = "<Finances>k__BackingField.<BankBalance>k__BackingField";
+    public static readonly string FieldPath = "<Finances>k__BackingField.<BankBalance>k__BackingField";
     public string[] SupportedFields => new[] { "money", "cash", "bank", "balance" };
 
     public bool TryGetField(ReplContext context, string fieldName, out object? value)
     {
-        value = context.GetField(FieldName);
+        value = context.GetField(FieldPath);
         return value != null;
     }
 
     public bool TrySetField(ReplContext context, string fieldName, object value)
     {
-        return context.SetField(FieldName, value);
+        return context.SetField(FieldPath, value);
     }
 
     public string GetDescription(string fieldName)
@@ -1076,29 +1092,6 @@ public class GetCommand : IReplCommand
     }
 
     public string GetHelp() => "get <field> - Get the current value of a field";
-}
-
-public class ShowCommand : IReplCommand
-{
-    public void Execute(ReplContext context, string[] args)
-    {
-        Console.WriteLine("=== Current Character Stats ===");
-
-        string[] statsToShow = {
-            MoneyFieldHandler.FieldName,
-        };
-
-        foreach (string stat in statsToShow)
-        {
-            var value = context.GetField(stat);
-            if (value != null)
-            {
-                Console.WriteLine($"{stat}: {value}");
-            }
-        }
-    }
-
-    public string GetHelp() => "show - Display current character statistics";
 }
 
 public class SaveCommand : IReplCommand
