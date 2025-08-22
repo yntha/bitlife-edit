@@ -1140,9 +1140,12 @@ public class HelpCommand : IReplCommand
         Console.WriteLine();
         Console.WriteLine("Supported fields:");
         Console.WriteLine("  money, cash, bank, balance - Character's money");
+        Console.WriteLine("  age                        - Character's age");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  set money 99999     - Set money to 99,999");
+        Console.WriteLine("  get money           - Get current money value");
+        Console.WriteLine("  set age 30          - Set age to 30");
         Console.WriteLine("  show                - Display all stats");
     }
 
