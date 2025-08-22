@@ -588,7 +588,11 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
 
             foreach (var field in fields)
             {
-                if (field.Value != null)
+                if (field.Value == null)
+                {
+                    fieldContainer[field.Key] = null;
+                }
+                else
                 {
                     if (field.Value is not IEnumerable && field.Value.GetType().IsClass && field.Value.GetType() != typeof(string))
                     {
