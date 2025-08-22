@@ -773,7 +773,8 @@ public class ReplContext
         // init field handlers
         fieldHandlers = new List<IFieldHandler>
         {
-            new MoneyFieldHandler()
+            new MoneyFieldHandler(),
+            new AgeFieldHandler()
         };
     }
 
@@ -934,6 +935,43 @@ public class MoneyFieldHandler : IFieldHandler
     public bool TrySetField(ReplContext context, string fieldName, object value)
     {
         return context.SetField(FieldName, value);
+    }
+
+    public string GetDescription(string fieldName)
+    {
+        return "Character's money/bank balance";
+    }
+}
+
+public class AgeFieldHandler : IFieldHandler
+{
+    public string[] SupportedFields => new[] { "age" };
+
+    public bool TryGetField(ReplContext context, string fieldName, out object? value)
+    {
+        SimPerson val = context.SaveData.Hero;
+        if (val is not null)
+        {
+            value = val.Age;
+        }
+        else
+        {
+            value = null;
+        }
+        return value != null;
+    }
+    public bool TrySetField(ReplContext context, string fieldName, object value)
+    {
+        SimPerson val = context.SaveData.Hero;
+        if (val is not null)
+        {
+            val.Age = Convert.ToInt32(value);
+            return true;
+        }
+        else
+        {
+            return false;
+        }
     }
 
     public string GetDescription(string fieldName)
