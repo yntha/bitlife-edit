@@ -66,7 +66,9 @@ public class Program
     private static readonly byte[] saveGameHeader = {
         0x00, 0x01, 0x00, 0x00
     };
-    private static BitLifeEditOptions? options;    private static object? Deserialize(byte[] inputData)
+    private static BitLifeEditOptions? options;
+
+    private static object? Deserialize(byte[] inputData)
     {
         object? deserialized = null;
 
@@ -98,6 +100,7 @@ public class Program
         catch (Exception e)
         {
             Console.WriteLine("Deserializer Error: " + e.Message);
+            throw;
         }
 
         return deserialized;
@@ -452,7 +455,7 @@ public class Program
             return;
         }
 
-        var repl = new BitLifeRepl(saveData, options);
+        var repl = new BitLifeRepl((Life) saveData, options);
         repl.Run();
     }
 
@@ -674,12 +677,12 @@ public class DataFileJSONConverter<T> : JsonConverter<T>
 
 public class BitLifeRepl
 {
-    private readonly object saveData;
+    private readonly Life saveData;
     private readonly Program.BitLifeEditOptions options;
     private readonly Dictionary<string, IReplCommand> commands;
     private bool isRunning = true;
 
-    public BitLifeRepl(object saveData, Program.BitLifeEditOptions options)
+    public BitLifeRepl(Life saveData, Program.BitLifeEditOptions options)
     {
         this.saveData = saveData;
         this.options = options;
@@ -752,12 +755,12 @@ public class BitLifeRepl
 
 public class ReplContext
 {
-    public object SaveData { get; }
+    public Life SaveData { get; }
     public Program.BitLifeEditOptions Options { get; }
     public BitLifeRepl Repl { get; }
     private readonly List<IFieldHandler> fieldHandlers;
 
-    public ReplContext(object saveData, Program.BitLifeEditOptions options, BitLifeRepl repl)
+    public ReplContext(Life saveData, Program.BitLifeEditOptions options, BitLifeRepl repl)
     {
         SaveData = saveData;
         Options = options;
