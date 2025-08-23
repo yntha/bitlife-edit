@@ -724,7 +724,6 @@ public class BitLifeRepl
     {
         Console.WriteLine("==== BitLife Save Editor REPL ====");
         Console.WriteLine("Type 'help' for available commands or 'quit' to exit.");
-        Console.WriteLine("Example: set money 99999");
         Console.WriteLine();
 
         while (isRunning)
@@ -992,7 +991,7 @@ public class AgeFieldHandler : IFieldHandler
 
     public string GetDescription(string fieldName)
     {
-        return "Character's money/bank balance";
+        return "Character's age";
     }
 }
 
@@ -1126,17 +1125,18 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Available commands:");
         Console.WriteLine("  set <field> <value> - Set a field to a specific value");
         Console.WriteLine("  get <field>         - Get the current value of a field");
-        Console.WriteLine("  show                - Display current character stats");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
         Console.WriteLine();
         Console.WriteLine("Supported fields:");
         Console.WriteLine("  money, cash, bank, balance - Character's money");
+        Console.WriteLine("  age                        - Character's age");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  set money 99999     - Set money to 99,999");
-        Console.WriteLine("  show                - Display all stats");
+        Console.WriteLine("  get age             - Get the character's age");
+        Console.WriteLine("  set age 912         - If you're feeling like Seth");
     }
 
     public string GetHelp() => "help - Show available commands";

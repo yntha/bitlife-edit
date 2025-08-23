@@ -8,7 +8,7 @@ Download the latest release from the [releases page](https://github.com/yntha/bi
 
 ## Usage
 #### The Save Editor
-bitlife-edit comes with a REPL that allows you to edit save files interactively. To start it, run:
+bitlife-edit comes with a REPL that allows you to edit save files interactively. With the save editor, you are also able to edit values that aren't normally accessible in the dump, like your age. To start it, run:
 ```sh
 bitlife-edit.exe -r -m <mono dll path> <saveFile.data>
 ```
@@ -17,7 +17,6 @@ The REPL also launches automatically if you run the program without any argument
 bitlife-edit.exe -m <mono dll path> <saveFile.data>
 ==== BitLife Save Editor REPL ====
 Type 'help' for available commands or 'quit' to exit.
-Example: set money 99999
 
 bitlife>
 ```
@@ -27,17 +26,18 @@ bitlife> help
 Available commands:
   set <field> <value> - Set a field to a specific value
   get <field>         - Get the current value of a field
-  show                - Display current character stats
-  save [filename]     - Save changes to file. Must be used before exiting.
+  save [filename]     - Save changes to file
   help                - Show this help message
   quit/exit           - Exit the REPL
 
 Supported fields:
   money, cash, bank, balance - Character's money
+  age                        - Character's age
 
 Examples:
-  set bank 99999      - Set money to 99,999
-  show                - Display all stat
+  set money 99999     - Set money to 99,999
+  get age             - Get the character's age
+  set age 912         - If you're feeling like Seth
 ```
 
 #### Dumping a save file
