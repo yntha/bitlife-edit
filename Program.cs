@@ -76,8 +76,8 @@ public class Program
 
 #pragma warning disable SYSLIB0011
             BinaryFormatter binaryFormatter = new();
-            binaryFormatter.SurrogateSelector = new PermissiveSurrogateSelector();
-            binaryFormatter.Binder = new PermissiveSerializationBinder();
+            // binaryFormatter.SurrogateSelector = new PermissiveSurrogateSelector();
+            // binaryFormatter.Binder = new PermissiveSerializationBinder();
 #pragma warning restore SYSLIB0011
             deserialized = binaryFormatter.Deserialize(memoryStream);
         }
@@ -109,8 +109,8 @@ public class Program
 
 #pragma warning disable SYSLIB0011
         BinaryFormatter binaryFormatter = new();
-        binaryFormatter.SurrogateSelector = new DebuggingSurrogateSelector();
-        binaryFormatter.Binder = new PermissiveSerializationBinder();
+        //binaryFormatter.SurrogateSelector = new DebuggingSurrogateSelector();
+        //binaryFormatter.Binder = new PermissiveSerializationBinder();
 #pragma warning restore SYSLIB0011
 
         return binaryFormatter.Deserialize(memoryStream);
@@ -1153,148 +1153,148 @@ public class QuitCommand : IReplCommand
     public string GetHelp() => "quit - Exit the REPL";
 }
 
-#pragma warning disable SYSLIB0050 // Type or member is obsolete
-public class LifeSerializationSurrogate : ISerializationSurrogate
-{
-    public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
-    {
-        throw new NotImplementedException();
-    }
+// #pragma warning disable SYSLIB0050 // Type or member is obsolete
+// public class LifeSerializationSurrogate : ISerializationSurrogate
+// {
+//     public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
+//     {
+//         throw new NotImplementedException();
+//     }
 
-    public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector? selector)
-    {
-        var life = (Life)obj;
-        var fields = typeof(Life).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+//     public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector? selector)
+//     {
+//         var life = (Life)obj;
+//         var fields = typeof(Life).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
-        foreach (var field in fields)
-        {
-            try
-            {
-                var value = info.GetValue(field.Name, field.FieldType);
-                field.SetValue(life, value);
-            }
-            catch (InvalidCastException ex) when (ex.Message.Contains("IConvertible"))
-            {
-                Console.WriteLine($"Skipping problematic field: {field.Name} of type {field.FieldType}");
+//         foreach (var field in fields)
+//         {
+//             try
+//             {
+//                 var value = info.GetValue(field.Name, field.FieldType);
+//                 field.SetValue(life, value);
+//             }
+//             catch (InvalidCastException ex) when (ex.Message.Contains("IConvertible"))
+//             {
+//                 Console.WriteLine($"Skipping problematic field: {field.Name} of type {field.FieldType}");
 
-                if (field.FieldType.IsGenericType && field.FieldType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
-                {
-                    HandleProblematicDictionary(life, field, info);
-                }
-                else
-                {
-                    field.SetValue(life, GetDefaultValue(field.FieldType));
-                }
-            }
-            catch (Exception ex)
-            {
-                field.SetValue(life, GetDefaultValue(field.FieldType));
-            }
-        }
+//                 if (field.FieldType.IsGenericType && field.FieldType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+//                 {
+//                     HandleProblematicDictionary(life, field, info);
+//                 }
+//                 else
+//                 {
+//                     field.SetValue(life, GetDefaultValue(field.FieldType));
+//                 }
+//             }
+//             catch (Exception ex)
+//             {
+//                 field.SetValue(life, GetDefaultValue(field.FieldType));
+//             }
+//         }
 
-        return life;
-    }
+//         return life;
+//     }
 
-    private void HandleProblematicDictionary(Life life, FieldInfo field, SerializationInfo info)
-    {
-        try
-        {
-            var dictType = field.FieldType;
-            var emptyDict = Activator.CreateInstance(dictType);
-            field.SetValue(life, emptyDict);
+//     private void HandleProblematicDictionary(Life life, FieldInfo field, SerializationInfo info)
+//     {
+//         try
+//         {
+//             var dictType = field.FieldType;
+//             var emptyDict = Activator.CreateInstance(dictType);
+//             field.SetValue(life, emptyDict);
 
-            Console.WriteLine($"Set {field.Name} to empty dictionary due to serialization issues");
-        }
-        catch (Exception ex)
-        {
-            field.SetValue(life, null);
-        }
-    }
+//             Console.WriteLine($"Set {field.Name} to empty dictionary due to serialization issues");
+//         }
+//         catch (Exception ex)
+//         {
+//             field.SetValue(life, null);
+//         }
+//     }
 
-    private object? GetDefaultValue(Type type)
-    {
-        if (type.IsValueType)
-        {
-            return Activator.CreateInstance(type);
-        }
-        return null;
-    }
-}
+//     private object? GetDefaultValue(Type type)
+//     {
+//         if (type.IsValueType)
+//         {
+//             return Activator.CreateInstance(type);
+//         }
+//         return null;
+//     }
+// }
 
-// Generic dictionary surrogate for other problematic dictionaries
-public class GenericDictionarySurrogate : ISerializationSurrogate
-{
-    public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
-    {
-        throw new NotImplementedException();
-    }
+// // Generic dictionary surrogate for other problematic dictionaries
+// public class GenericDictionarySurrogate : ISerializationSurrogate
+// {
+//     public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
+//     {
+//         throw new NotImplementedException();
+//     }
 
-    public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector? selector)
-    {
-        var dictType = obj.GetType();
+//     public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector? selector)
+//     {
+//         var dictType = obj.GetType();
 
-        try
-        {
-            var emptyDict = Activator.CreateInstance(dictType);
-            return emptyDict ?? obj;
-        }
-        catch
-        {
-            return obj;
-        }
-    }
-}
+//         try
+//         {
+//             var emptyDict = Activator.CreateInstance(dictType);
+//             return emptyDict ?? obj;
+//         }
+//         catch
+//         {
+//             return obj;
+//         }
+//     }
+// }
 
-// permissive surrogate selector for fallback deserialization
-public class PermissiveSurrogateSelector : ISurrogateSelector
-{
-    public void ChainSelector(ISurrogateSelector selector) { }
-    public ISurrogateSelector? GetNextSelector() => null;    public ISerializationSurrogate? GetSurrogate(Type type, StreamingContext context, out ISurrogateSelector selector)
-    {
-        selector = null!;
+// // permissive surrogate selector for fallback deserialization
+// public class PermissiveSurrogateSelector : ISurrogateSelector
+// {
+//     public void ChainSelector(ISurrogateSelector selector) { }
+//     public ISurrogateSelector? GetNextSelector() => null;    public ISerializationSurrogate? GetSurrogate(Type type, StreamingContext context, out ISurrogateSelector selector)
+//     {
+//         selector = null!;
 
-        if (type == typeof(Life))
-        {
-            return new LifeSerializationSurrogate();
-        }
+//         if (type == typeof(Life))
+//         {
+//             return new LifeSerializationSurrogate();
+//         }
 
-        // using a generic surrogate for all dictionary types to avoid IConvertible issues
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
-        {
-            return new GenericDictionarySurrogate();
-        }
+//         // using a generic surrogate for all dictionary types to avoid IConvertible issues
+//         if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+//         {
+//             return new GenericDictionarySurrogate();
+//         }
 
-        return null;
-    }
-}
+//         return null;
+//     }
+// }
 
-public class PermissiveSerializationBinder : SerializationBinder
-{
-    public override Type? BindToType(string assemblyName, string typeName)
-    {
-        // Console.WriteLine($"Binding: {assemblyName} -> {typeName}");
-        return null;
-    }
-}
+// public class PermissiveSerializationBinder : SerializationBinder
+// {
+//     public override Type? BindToType(string assemblyName, string typeName)
+//     {
+//         // Console.WriteLine($"Binding: {assemblyName} -> {typeName}");
+//         return null;
+//     }
+// }
 
-public class DebuggingSurrogateSelector : ISurrogateSelector
-{
-    public void ChainSelector(ISurrogateSelector selector) { }
-    public ISurrogateSelector? GetNextSelector() => null;    public ISerializationSurrogate? GetSurrogate(Type type, StreamingContext context, out ISurrogateSelector selector)
-    {
-        selector = null!;
-        //Console.WriteLine($"Deserializing type: {type.FullName}");
+// public class DebuggingSurrogateSelector : ISurrogateSelector
+// {
+//     public void ChainSelector(ISurrogateSelector selector) { }
+//     public ISurrogateSelector? GetNextSelector() => null;    public ISerializationSurrogate? GetSurrogate(Type type, StreamingContext context, out ISurrogateSelector selector)
+//     {
+//         selector = null!;
+//         //Console.WriteLine($"Deserializing type: {type.FullName}");
 
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
-        {
-            var keyType = type.GetGenericArguments()[0];
-            var valueType = type.GetGenericArguments()[1];
-            // Console.WriteLine($"  Dictionary<{keyType.FullName}, {valueType.FullName}>");
-            // Console.WriteLine($"  Key type implements IConvertible: {typeof(IConvertible).IsAssignableFrom(keyType)}");
-            // Console.WriteLine($"  Value type implements IConvertible: {typeof(IConvertible).IsAssignableFrom(valueType)}");
-        }
+//         if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+//         {
+//             var keyType = type.GetGenericArguments()[0];
+//             var valueType = type.GetGenericArguments()[1];
+//             // Console.WriteLine($"  Dictionary<{keyType.FullName}, {valueType.FullName}>");
+//             // Console.WriteLine($"  Key type implements IConvertible: {typeof(IConvertible).IsAssignableFrom(keyType)}");
+//             // Console.WriteLine($"  Value type implements IConvertible: {typeof(IConvertible).IsAssignableFrom(valueType)}");
+//         }
 
-        return null;
-    }
-}
-#pragma warning restore SYSLIB0050
+//         return null;
+//     }
+// }
+// #pragma warning restore SYSLIB0050
