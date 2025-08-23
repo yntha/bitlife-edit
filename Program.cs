@@ -787,7 +787,8 @@ public class ReplContext
         fieldHandlers = new List<IFieldHandler>
         {
             new MoneyFieldHandler(),
-            new AgeFieldHandler()
+            new AgeFieldHandler(),
+            //new HappinessFieldHandler()
         };
     }
 
@@ -994,6 +995,42 @@ public class AgeFieldHandler : IFieldHandler
         return "Character's age";
     }
 }
+
+// public class HappinessFieldHandler : IFieldHandler
+// {
+//     public string[] SupportedFields => new[] {
+//         "happiness", "acting", "appearance", "athleticism",
+//         "charisma", "connection", "craziness", "dealing",
+//         "discipline", "fame", "fertility", "generosity",
+//         "health", "homo", "intelligence", "karma",
+//         "loyalty", "modeling", "music", "willness",
+//         "willpower"
+//     };
+
+//     public bool TryGetField(ReplContext context, string fieldName, out object? value)
+//     {
+//         value = context.GetProperty($"Hero.Att_{fieldName}");
+//         return value != null;
+//     }
+//     public bool TrySetField(ReplContext context, string fieldName, object value)
+//     {
+//         SimPerson val = context.SaveData.Hero;
+//         if (val is not null)
+//         {
+//             val.Att_happiness = Convert.ToInt32(value);
+//             return true;
+//         }
+//         else
+//         {
+//             return false;
+//         }
+//     }
+
+//     public string GetDescription(string fieldName)
+//     {
+//         return "Character's age";
+//     }
+// }
 
 public interface IReplCommand
 {
