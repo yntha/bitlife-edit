@@ -715,6 +715,8 @@ public class BitLifeRepl
         commands["set"] = new SetCommand();
         commands["get"] = new GetCommand();
         commands["help"] = new HelpCommand();
+        commands["people"] = new PeopleCommand();
+        commands["rel"] = new RelCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
         commands["exit"] = new QuitCommand();
@@ -1111,16 +1113,45 @@ public class ProfileFieldHandler : IFieldHandler
         "firstname", "lastname", "gender", "sexuality", "salary", "pension", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
-    private static IEnumerable<object> People(Life life)
-    {
-        foreach (string name in new[] { "Mother", "Father", "Lover" })
-            if (Refl.Get(life, name) is object person) yield return person;
+    public record RosterEntry(string Group, string Role, object Person);
 
-        foreach (string name in new[] { "_ChildArray", "_SiblingArray", "_FriendArray" })
-            if (Refl.Get(life, name) is System.Collections.IEnumerable list)
-                foreach (object? person in list)
-                    if (person != null) yield return person;
+    // everyone shown on the game's Relationships tab, in a stable order (list position = id for `rel`)
+    public static List<RosterEntry> Roster(Life life)
+    {
+        var list = new List<RosterEntry>();
+
+        void Add(string group, string role, object? person)
+        {
+            if (person != null) list.Add(new RosterEntry(group, role, person));
+        }
+
+        void AddAll(string group, string field, string male, string female, string other)
+        {
+            if (Refl.Get(life, field) is not System.Collections.IEnumerable people) return;
+            foreach (object? person in people)
+            {
+                if (person == null) continue;
+                string role = Convert.ToInt32(Refl.Get(person, "Gender") ?? -1) switch { 0 => male, 1 => female, _ => other };
+                Add(group, role, person);
+            }
+        }
+
+        Add("Parents", "Mother", Refl.Get(life, "Mother"));
+        Add("Parents", "Father", Refl.Get(life, "Father"));
+        Add("Partner", "Partner", Refl.Get(life, "Lover"));
+        AddAll("Children", "_ChildArray", "Son", "Daughter", "Child");
+        AddAll("Siblings", "_SiblingArray", "Brother", "Sister", "Sibling");
+        AddAll("Friends", "_FriendArray", "Friend", "Friend", "Friend");
+        return list;
     }
+
+    public static string NameOf(object person)
+    {
+        object? name = Refl.Get(person, "Name");
+        return name == null ? "?" : $"{Refl.Get(name, "FirstName")} {Refl.Get(name, "LastName")}".Trim();
+    }
+
+    private static IEnumerable<object> People(Life life) => Roster(life).Select(e => e.Person);
 
     // the object and field a simple field name lives on (null if the parent doesn't exist, e.g. no job)
     private static (object? Owner, string Field)? Locate(Life life, string field)
@@ -1333,6 +1364,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Available commands:");
         Console.WriteLine("  set <field> <value> - Set a field to a specific value");
         Console.WriteLine("  get <field>         - Get the current value of a field");
+        Console.WriteLine("  people              - List family, partner and friends with their relationship strength");
+        Console.WriteLine("  rel <id> <0-100> <full name> - Set one person's relationship strength");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1360,6 +1393,53 @@ public class HelpCommand : IReplCommand
     }
 
     public string GetHelp() => "help - Show available commands";
+}
+
+public class PeopleCommand : IReplCommand
+{
+    // one line per person: person|<id>|<group>|<role>|<name>|<strength>|<alive>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var roster = ProfileFieldHandler.Roster(context.SaveData);
+        for (int i = 0; i < roster.Count; i++)
+        {
+            object person = roster[i].Person;
+            double strength = Math.Round(Convert.ToDouble(Refl.Get(person, "HeroRelationshipStrength") ?? 0));
+            Console.WriteLine($"person|{i}|{roster[i].Group}|{roster[i].Role}|{ProfileFieldHandler.NameOf(person)}|{strength}|{Refl.Get(person, "Alive") ?? true}");
+        }
+        if (roster.Count == 0) Console.WriteLine("No relationships found.");
+    }
+
+    public string GetHelp() => "people - List family, partner and friends with their relationship strength";
+}
+
+public class RelCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !float.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine("Usage: rel <id> <0-100> <full name>   (ids and names come from 'people')");
+            return;
+        }
+
+        // the name guards against a stale id if the list changed since it was read
+        string name = string.Join(' ', args.Skip(2));
+        var roster = ProfileFieldHandler.Roster(context.SaveData);
+
+        if (index < 0 || index >= roster.Count || ProfileFieldHandler.NameOf(roster[index].Person) != name)
+        {
+            Console.WriteLine($"Could not set relationship: {name}");
+            return;
+        }
+
+        Refl.Set(roster[index].Person, "HeroRelationshipStrength", Math.Clamp(value, 0f, 100f));
+        Console.WriteLine($"Set relationship of {name} to: {Math.Clamp(value, 0f, 100f)}");
+    }
+
+    public string GetHelp() => "rel <id> <0-100> <full name> - Set one person's relationship strength";
 }
 
 public class QuitCommand : IReplCommand
