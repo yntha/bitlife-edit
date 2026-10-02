@@ -1110,7 +1110,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1165,6 +1165,7 @@ public class ProfileFieldHandler : IFieldHandler
             "sexuality" => (hero, "Sexuality"),
             "salary" => (Refl.Get(life, "Occupation"), "Salary"),
             "pension" => (Refl.Get(life, "Finances"), "Pension"),
+            "respect" => (Refl.Get(life, "Royal"), "Att_respect"),    // only exists while the character is royalty
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
         };
@@ -1224,6 +1225,8 @@ public class ProfileFieldHandler : IFieldHandler
             if (fieldName == "gender" && genders.TryGetValue(text.ToLower(), out int g)) value = g;
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
+
+        if (fieldName == "respect") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1379,6 +1382,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  firstname, lastname        - Character's name");
         Console.WriteLine("  gender (0-2), sexuality (0-3) - Identity; names also work (male/female/both, hetero/homo/bi)");
         Console.WriteLine("  salary, pension            - Job salary (needs a job) and pension");
+        Console.WriteLine("  respect                    - Royal respect (0-100); only while the character is royalty");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
