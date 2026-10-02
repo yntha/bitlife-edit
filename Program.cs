@@ -1112,7 +1112,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1145,6 +1145,10 @@ public class ProfileFieldHandler : IFieldHandler
         AddAll("Children", "_ChildArray", "Son", "Daughter", "Child");
         AddAll("Siblings", "_SiblingArray", "Brother", "Sister", "Sibling");
         AddAll("Friends", "_FriendArray", "Friend", "Friend", "Friend");
+
+        // professionals you hired: they are people too (same relationship bar)
+        Add("Advisors", "Financial Advisor", Refl.Get(life, "_Portfolio") is object portfolio ? Refl.Get(portfolio, "FinancialAdvisor") : null);
+        Add("Advisors", "Talent Agent", Refl.Get(life, "TalentAgent"));
 
         // school and work: the current occupation holds the school (teachers, classmates) or the workplace (coworkers)
         void AddFrom(string group, string role, object? owner, string field)
@@ -1188,6 +1192,8 @@ public class ProfileFieldHandler : IFieldHandler
             "grades" => (Refl.Get(life, "Occupation"), "Att_grades"),               // only a student occupation has these
             "popularity" => (Refl.Get(life, "Occupation"), "Att_popularity"),
             "jobperformance" => (Refl.Get(life, "Occupation"), "Att_performance"),  // only an employee occupation has this
+            "advisorreputation" => (Refl.Get(life, "_Portfolio") is object pf ? Refl.Get(pf, "FinancialAdvisor") : null, "Att_reputation"),
+            "agentreputation" => (Refl.Get(life, "TalentAgent"), "Att_reputation"),
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
         };
@@ -1248,7 +1254,7 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1409,6 +1415,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  respect                    - Royal respect (0-100); only while the character is royalty");
         Console.WriteLine("  grades, popularity         - School stats (0-100); only while in school");
         Console.WriteLine("  jobperformance             - Job performance (0-100); only while employed");
+        Console.WriteLine("  advisorreputation, agentreputation - Reputation of your financial advisor / talent agent (0-100)");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
