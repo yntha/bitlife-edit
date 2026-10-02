@@ -1115,7 +1115,8 @@ public class ProfileFieldHandler : IFieldHandler
 
     public record RosterEntry(string Group, string Role, object Person);
 
-    // everyone shown on the game's Relationships tab, in a stable order (list position = id for `rel`)
+    // everyone shown on the game's Relationships tab, plus your current teachers, classmates and coworkers,
+    // in a stable order (list position = id for `rel`)
     public static List<RosterEntry> Roster(Life life)
     {
         var list = new List<RosterEntry>();
@@ -1142,6 +1143,22 @@ public class ProfileFieldHandler : IFieldHandler
         AddAll("Children", "_ChildArray", "Son", "Daughter", "Child");
         AddAll("Siblings", "_SiblingArray", "Brother", "Sister", "Sibling");
         AddAll("Friends", "_FriendArray", "Friend", "Friend", "Friend");
+
+        // school and work: the current occupation holds the school (teachers, classmates) or the workplace (coworkers)
+        void AddFrom(string group, string role, object? owner, string field)
+        {
+            if (owner == null || Refl.Get(owner, field) is not System.Collections.IEnumerable people) return;
+            foreach (object? person in people)
+                if (person != null) Add(group, role, person);
+        }
+
+        if (Refl.Get(life, "Occupation") is object occupation)
+        {
+            object? school = Refl.Get(occupation, "School");          // only a student occupation has one
+            AddFrom("Teachers", "Teacher", school, "_TeacherArray");
+            AddFrom("Classmates", "Classmate", school, "_ClassmateArray");
+            AddFrom("Coworkers", "Coworker", Refl.Get(occupation, "_WorkPlace"), "CoworkerArray");
+        }
         return list;
     }
 
@@ -1367,7 +1384,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Available commands:");
         Console.WriteLine("  set <field> <value> - Set a field to a specific value");
         Console.WriteLine("  get <field>         - Get the current value of a field");
-        Console.WriteLine("  people              - List family, partner and friends with their relationship strength");
+        Console.WriteLine("  people              - List family, partner, friends, teachers, classmates and coworkers with their relationship strength");
         Console.WriteLine("  rel <id> <0-100> <full name> - Set one person's relationship strength");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
