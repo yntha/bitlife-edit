@@ -1425,17 +1425,28 @@ public class RelCommand : IReplCommand
             return;
         }
 
-        // the name guards against a stale id if the list changed since it was read
+        // the name guards against a stale id: if the list changed since the id was read, look the person up by name
         string name = string.Join(' ', args.Skip(2));
         var roster = ProfileFieldHandler.Roster(context.SaveData);
 
-        if (index < 0 || index >= roster.Count || ProfileFieldHandler.NameOf(roster[index].Person) != name)
+        object? person = null;
+        if (index >= 0 && index < roster.Count && ProfileFieldHandler.NameOf(roster[index].Person) == name)
+        {
+            person = roster[index].Person;
+        }
+        else
+        {
+            var matches = roster.Where(e => ProfileFieldHandler.NameOf(e.Person) == name).ToList();
+            if (matches.Count == 1) person = matches[0].Person;
+        }
+
+        if (person == null)
         {
             Console.WriteLine($"Could not set relationship: {name}");
             return;
         }
 
-        Refl.Set(roster[index].Person, "HeroRelationshipStrength", Math.Clamp(value, 0f, 100f));
+        Refl.Set(person, "HeroRelationshipStrength", Math.Clamp(value, 0f, 100f));
         Console.WriteLine($"Set relationship of {name} to: {Math.Clamp(value, 0f, 100f)}");
     }
 
