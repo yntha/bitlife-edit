@@ -788,7 +788,8 @@ public class ReplContext
         {
             new MoneyFieldHandler(),
             new AgeFieldHandler(),
-            new AttributeFieldHandler()
+            new AttributeFieldHandler(),
+            new ProfileFieldHandler()
         };
     }
 
@@ -1067,6 +1068,141 @@ public class AttributeFieldHandler : IFieldHandler
     public string GetDescription(string fieldName) => "Character attribute (0-100)";
 }
 
+// Reflection helpers: the dummy assemblies expose state as (auto-property) backing fields, some on base classes.
+public static class Refl
+{
+    private const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+    public static FieldInfo? Field(object obj, string name)
+    {
+        for (Type? t = obj.GetType(); t != null; t = t.BaseType)
+        {
+            FieldInfo? f = t.GetField(name, Flags) ?? t.GetField($"<{name}>k__BackingField", Flags);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    public static object? Get(object obj, string name) => Field(obj, name)?.GetValue(obj);
+
+    public static bool Set(object obj, string name, object value)
+    {
+        FieldInfo? f = Field(obj, name);
+        if (f == null) return false;
+        f.SetValue(obj, Convert.ChangeType(value, f.FieldType));
+        return true;
+    }
+}
+
+// Identity, career, relationships and health fields on the hero / life.
+public class ProfileFieldHandler : IFieldHandler
+{
+    private static readonly Dictionary<string, string> lifeFields = new()
+    {
+        { "drivinglicense", "DrivingLicense" },
+        { "boatinglicense", "BoatingLicense" },
+        { "pilotslicense", "PilotsLicense" },
+        { "pilothours", "PilotHours" },
+    };
+    private static readonly Dictionary<string, int> genders = new() { { "male", 0 }, { "female", 1 }, { "both", 2 } };
+    private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
+
+    public string[] SupportedFields => new[] {
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "relationships", "diseases", "addictions"
+    }.Concat(lifeFields.Keys).ToArray();
+
+    private static IEnumerable<object> People(Life life)
+    {
+        foreach (string name in new[] { "Mother", "Father", "Lover" })
+            if (Refl.Get(life, name) is object person) yield return person;
+
+        foreach (string name in new[] { "_ChildArray", "_SiblingArray", "_FriendArray" })
+            if (Refl.Get(life, name) is System.Collections.IEnumerable list)
+                foreach (object? person in list)
+                    if (person != null) yield return person;
+    }
+
+    // the object and field a simple field name lives on (null if the parent doesn't exist, e.g. no job)
+    private static (object? Owner, string Field)? Locate(Life life, string field)
+    {
+        object? hero = life.Hero;
+        return field switch
+        {
+            "firstname" => (hero == null ? null : Refl.Get(hero, "Name"), "FirstName"),
+            "lastname" => (hero == null ? null : Refl.Get(hero, "Name"), "LastName"),
+            "gender" => (hero, "Gender"),
+            "sexuality" => (hero, "Sexuality"),
+            "salary" => (Refl.Get(life, "Occupation"), "Salary"),
+            "pension" => (Refl.Get(life, "Finances"), "Pension"),
+            _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
+            _ => null,
+        };
+    }
+
+    public bool TryGetField(ReplContext context, string fieldName, out object? value)
+    {
+        value = null;
+        Life life = context.SaveData;
+        fieldName = fieldName.ToLower();
+
+        switch (fieldName)
+        {
+            case "relationships":
+                var strengths = People(life).Select(p => Convert.ToDouble(Refl.Get(p, "HeroRelationshipStrength") ?? 0)).ToList();
+                if (strengths.Count == 0) return false;
+                value = Math.Round(strengths.Average());
+                return true;
+            case "diseases":
+            case "addictions":
+                value = (Refl.Get(life, fieldName == "diseases" ? "DiseaseArray" : "AddictionArray") as System.Collections.IList)?.Count;
+                return value != null;
+        }
+
+        var loc = Locate(life, fieldName);
+        if (loc?.Owner == null) return false;
+        value = Refl.Get(loc.Value.Owner!, loc.Value.Field);
+        return value != null;
+    }
+
+    public bool TrySetField(ReplContext context, string fieldName, object value)
+    {
+        Life life = context.SaveData;
+        fieldName = fieldName.ToLower();
+
+        switch (fieldName)
+        {
+            case "relationships":
+                float strength = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+                int count = 0;
+                foreach (object person in People(life))
+                    if (Refl.Set(person, "HeroRelationshipStrength", strength)) count++;
+                return count > 0;
+            case "diseases":
+            case "addictions":
+                var list = Refl.Get(life, fieldName == "diseases" ? "DiseaseArray" : "AddictionArray") as System.Collections.IList;
+                if (list == null) return false;
+                list.Clear();
+                return true;
+        }
+
+        var loc = Locate(life, fieldName);
+        if (loc?.Owner == null) return false;
+
+        if (value is string text)
+        {
+            if (fieldName == "gender" && genders.TryGetValue(text.ToLower(), out int g)) value = g;
+            else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
+        }
+
+        // the name object keeps a second copy of the first name
+        if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
+
+        return Refl.Set(loc.Value.Owner!, loc.Value.Field, value);
+    }
+
+    public string GetDescription(string fieldName) => "Identity, career, relationships or health field";
+}
+
 public interface IReplCommand
 {
     void Execute(ReplContext context, string[] args);
@@ -1086,7 +1222,7 @@ public class SetCommand : IReplCommand
         }
 
         string fieldName = args[0].ToLower();
-        string valueStr = args[1];
+        string valueStr = string.Join(' ', args.Skip(1));
 
         if (TryParseValue(valueStr, out object? value) && value != null)
         {
@@ -1207,6 +1343,12 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  happiness, health          - Main stats (0-100)");
         Console.WriteLine("  smarts, looks              - Main stats (0-100)");
         Console.WriteLine("  stats                      - Set/get happiness, health, smarts and looks together");
+        Console.WriteLine("  firstname, lastname        - Character's name");
+        Console.WriteLine("  gender (0-2), sexuality (0-3) - Identity; names also work (male/female/both, hetero/homo/bi)");
+        Console.WriteLine("  salary, pension            - Job salary (needs a job) and pension");
+        Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
+        Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
+        Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
         Console.WriteLine("  karma, fame, discipline, willpower, ... (see source) - Other attributes (0-100)");
         Console.WriteLine();
         Console.WriteLine("Examples:");
