@@ -717,6 +717,8 @@ public class BitLifeRepl
         commands["help"] = new HelpCommand();
         commands["people"] = new PeopleCommand();
         commands["rel"] = new RelCommand();
+        commands["activities"] = new ActivitiesCommand();
+        commands["act"] = new ActCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
         commands["exit"] = new QuitCommand();
@@ -1110,7 +1112,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1183,6 +1185,9 @@ public class ProfileFieldHandler : IFieldHandler
             "salary" => (Refl.Get(life, "Occupation"), "Salary"),
             "pension" => (Refl.Get(life, "Finances"), "Pension"),
             "respect" => (Refl.Get(life, "Royal"), "Att_respect"),    // only exists while the character is royalty
+            "grades" => (Refl.Get(life, "Occupation"), "Att_grades"),               // only a student occupation has these
+            "popularity" => (Refl.Get(life, "Occupation"), "Att_popularity"),
+            "jobperformance" => (Refl.Get(life, "Occupation"), "Att_performance"),  // only an employee occupation has this
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
         };
@@ -1243,7 +1248,7 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName == "respect") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1386,6 +1391,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  get <field>         - Get the current value of a field");
         Console.WriteLine("  people              - List family, partner, friends, teachers, classmates and coworkers with their relationship strength");
         Console.WriteLine("  rel <id> <0-100> <full name> - Set one person's relationship strength");
+        Console.WriteLine("  activities          - List school activities (teams, clubs) with their performance");
+        Console.WriteLine("  act <id> <0-100> <activity name> - Set one activity's performance");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1400,6 +1407,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  gender (0-2), sexuality (0-3) - Identity; names also work (male/female/both, hetero/homo/bi)");
         Console.WriteLine("  salary, pension            - Job salary (needs a job) and pension");
         Console.WriteLine("  respect                    - Royal respect (0-100); only while the character is royalty");
+        Console.WriteLine("  grades, popularity         - School stats (0-100); only while in school");
+        Console.WriteLine("  jobperformance             - Job performance (0-100); only while employed");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
@@ -1414,6 +1423,77 @@ public class HelpCommand : IReplCommand
     }
 
     public string GetHelp() => "help - Show available commands";
+}
+
+// the activities the hero is in at the current school (teams, clubs, ...): each has its own Performance
+public static class SchoolActivities
+{
+    public static List<object> List(Life life)
+    {
+        var result = new List<object>();
+        object? school = Refl.Get(life, "Occupation") is object occ ? Refl.Get(occ, "School") : null;
+        if (school != null && Refl.Get(school, "_HeroActivityArray") is System.Collections.IEnumerable items)
+            foreach (object? a in items)
+                if (a != null) result.Add(a);
+        return result;
+    }
+
+    public static string NameOf(object activity) => Refl.Get(activity, "ActivityName")?.ToString() ?? "?";
+}
+
+public class ActivitiesCommand : IReplCommand
+{
+    // one line per activity: activity|<id>|<name>|<status>|<performance>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var list = SchoolActivities.List(context.SaveData);
+        for (int i = 0; i < list.Count; i++)
+        {
+            double perf = Math.Round(Convert.ToDouble(Refl.Get(list[i], "Att_performance") ?? 0));
+            Console.WriteLine($"activity|{i}|{SchoolActivities.NameOf(list[i])}|{Refl.Get(list[i], "Status") ?? 0}|{perf}");
+        }
+        if (list.Count == 0) Console.WriteLine("No school activities found.");
+    }
+
+    public string GetHelp() => "activities - List the school activities (teams, clubs) with their performance";
+}
+
+public class ActCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !float.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine("Usage: act <id> <0-100> <activity name>   (ids and names come from 'activities')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(2));
+        var list = SchoolActivities.List(context.SaveData);
+
+        object? activity = null;
+        if (index >= 0 && index < list.Count && SchoolActivities.NameOf(list[index]) == name) activity = list[index];
+        else
+        {
+            var matches = list.Where(a => SchoolActivities.NameOf(a) == name).ToList();
+            if (matches.Count == 1) activity = matches[0];
+        }
+
+        if (activity == null)
+        {
+            Console.WriteLine($"Could not set activity: {name}");
+            return;
+        }
+
+        float v = Math.Clamp(value, 0f, 100f);
+        Refl.Set(activity, "Att_performance", v);
+        Console.WriteLine($"Set performance of {name} to: {v}");
+    }
+
+    public string GetHelp() => "act <id> <0-100> <activity name> - Set one school activity's performance";
 }
 
 public class PeopleCommand : IReplCommand
