@@ -77,7 +77,7 @@ public class Program
 #pragma warning disable SYSLIB0011
             BinaryFormatter binaryFormatter = new();
             // binaryFormatter.SurrogateSelector = new PermissiveSurrogateSelector();
-            // binaryFormatter.Binder = new PermissiveSerializationBinder();
+            binaryFormatter.Binder = new MonoSerializationBinder();
 #pragma warning restore SYSLIB0011
             deserialized = binaryFormatter.Deserialize(memoryStream);
         }
@@ -110,7 +110,7 @@ public class Program
 #pragma warning disable SYSLIB0011
         BinaryFormatter binaryFormatter = new();
         //binaryFormatter.SurrogateSelector = new DebuggingSurrogateSelector();
-        //binaryFormatter.Binder = new PermissiveSerializationBinder();
+        binaryFormatter.Binder = new MonoSerializationBinder();
 #pragma warning restore SYSLIB0011
 
         return binaryFormatter.Deserialize(memoryStream);
@@ -383,7 +383,7 @@ public class Program
             // serialize to a stream
             using MemoryStream memoryStream = new();
 #pragma warning disable SYSLIB0011 // Type or member is obsolete
-            BinaryFormatter binaryFormatter = new();
+            BinaryFormatter binaryFormatter = new() { Binder = new MonoSerializationBinder() };
             binaryFormatter.Serialize(memoryStream, deserializedData);
 #pragma warning restore SYSLIB0011 // Type or member is obsolete
             File.WriteAllBytes(options.InputFile!, memoryStream.ToArray());
@@ -1137,7 +1137,7 @@ public class SaveCommand : IReplCommand
         {
             using MemoryStream memoryStream = new();
 #pragma warning disable SYSLIB0011
-            BinaryFormatter binaryFormatter = new();
+            BinaryFormatter binaryFormatter = new() { Binder = new MonoSerializationBinder() };
             binaryFormatter.Serialize(memoryStream, context.SaveData);
 #pragma warning restore SYSLIB0011
 
@@ -1335,3 +1335,34 @@ public class QuitCommand : IReplCommand
 //     }
 // }
 // #pragma warning restore SYSLIB0050
+
+// Mono serializes string-keyed dictionaries with its internal comparer, which .NET lacks.
+// Read it as a local stand-in and write it back under the Mono name so the game still accepts the save.
+[Serializable]
+public sealed class InternalStringComparer : EqualityComparer<string>
+{
+    public override bool Equals(string? x, string? y) => string.Equals(x, y, StringComparison.Ordinal);
+    public override int GetHashCode(string obj) => obj.GetHashCode();
+}
+
+public class MonoSerializationBinder : SerializationBinder
+{
+    private const string MonoComparerName = "System.Collections.Generic.InternalStringComparer";
+    private const string MonoCorlib = "mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089";
+
+    public override Type? BindToType(string assemblyName, string typeName) =>
+        typeName == MonoComparerName ? typeof(InternalStringComparer) : null;
+
+    public override void BindToName(Type serializedType, out string? assemblyName, out string? typeName)
+    {
+        if (serializedType == typeof(InternalStringComparer))
+        {
+            assemblyName = MonoCorlib;
+            typeName = MonoComparerName;
+        }
+        else
+        {
+            base.BindToName(serializedType, out assemblyName, out typeName);
+        }
+    }
+}
