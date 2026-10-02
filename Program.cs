@@ -788,7 +788,7 @@ public class ReplContext
         {
             new MoneyFieldHandler(),
             new AgeFieldHandler(),
-            //new HappinessFieldHandler()
+            new AttributeFieldHandler()
         };
     }
 
@@ -996,41 +996,76 @@ public class AgeFieldHandler : IFieldHandler
     }
 }
 
-// public class HappinessFieldHandler : IFieldHandler
-// {
-//     public string[] SupportedFields => new[] {
-//         "happiness", "acting", "appearance", "athleticism",
-//         "charisma", "connection", "craziness", "dealing",
-//         "discipline", "fame", "fertility", "generosity",
-//         "health", "homo", "intelligence", "karma",
-//         "loyalty", "modeling", "music", "willness",
-//         "willpower"
-//     };
+// Hero attributes (happiness, health, smarts, looks, ...). Stored as float Att_* fields on SimPerson, 0-100.
+public class AttributeFieldHandler : IFieldHandler
+{
+    private static readonly Dictionary<string, string> aliases = new()
+    {
+        { "smarts", "intelligence" },
+        { "looks", "appearance" },
+    };
 
-//     public bool TryGetField(ReplContext context, string fieldName, out object? value)
-//     {
-//         value = context.GetProperty($"Hero.Att_{fieldName}");
-//         return value != null;
-//     }
-//     public bool TrySetField(ReplContext context, string fieldName, object value)
-//     {
-//         SimPerson val = context.SaveData.Hero;
-//         if (val is not null)
-//         {
-//             val.Att_happiness = Convert.ToInt32(value);
-//             return true;
-//         }
-//         else
-//         {
-//             return false;
-//         }
-//     }
+    // every simple Att_* attribute except money, which MoneyFieldHandler owns
+    private static readonly string[] attributes = {
+        "happiness", "health", "intelligence", "appearance", "discipline", "karma", "homo", "fertility",
+        "willpower", "wiliness", "generosity", "fame", "athleticism", "craziness", "loyalty", "connection",
+        "charisma", "music", "acting", "modeling", "dealing"
+    };
 
-//     public string GetDescription(string fieldName)
-//     {
-//         return "Character's age";
-//     }
-// }
+    // set/get several at once: "stats" = happiness, health, smarts, looks
+    private static readonly string[] mainStats = { "happiness", "health", "intelligence", "appearance" };
+
+    public string[] SupportedFields => attributes.Concat(aliases.Keys).Append("stats").ToArray();
+
+    private static FieldInfo? FindField(object hero, string attribute)
+    {
+        string name = $"<Att_{attribute}>k__BackingField";
+
+        for (Type? t = hero.GetType(); t != null; t = t.BaseType)
+        {
+            FieldInfo? f = t.GetField(name, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    public bool TryGetField(ReplContext context, string fieldName, out object? value)
+    {
+        value = null;
+        object? hero = context.SaveData.Hero;
+        if (hero == null) return false;
+
+        fieldName = fieldName.ToLower();
+        if (fieldName == "stats")
+        {
+            value = string.Join(", ", mainStats.Select(a => $"{a}={FindField(hero, a)?.GetValue(hero)}"));
+            return true;
+        }
+
+        value = FindField(hero, aliases.GetValueOrDefault(fieldName, fieldName))?.GetValue(hero);
+        return value != null;
+    }
+
+    public bool TrySetField(ReplContext context, string fieldName, object value)
+    {
+        object? hero = context.SaveData.Hero;
+        if (hero == null) return false;
+
+        fieldName = fieldName.ToLower();
+        float v = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        string[] targets = fieldName == "stats" ? mainStats : new[] { aliases.GetValueOrDefault(fieldName, fieldName) };
+
+        foreach (string attribute in targets)
+        {
+            FieldInfo? field = FindField(hero, attribute);
+            if (field == null) return false;
+            field.SetValue(hero, v);
+        }
+        return true;
+    }
+
+    public string GetDescription(string fieldName) => "Character attribute (0-100)";
+}
 
 public interface IReplCommand
 {
@@ -1169,11 +1204,17 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Supported fields:");
         Console.WriteLine("  money, cash, bank, balance - Character's money");
         Console.WriteLine("  age                        - Character's age");
+        Console.WriteLine("  happiness, health          - Main stats (0-100)");
+        Console.WriteLine("  smarts, looks              - Main stats (0-100)");
+        Console.WriteLine("  stats                      - Set/get happiness, health, smarts and looks together");
+        Console.WriteLine("  karma, fame, discipline, willpower, ... (see source) - Other attributes (0-100)");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  set money 99999     - Set money to 99,999");
         Console.WriteLine("  get age             - Get the character's age");
         Console.WriteLine("  set age 912         - If you're feeling like Seth");
+        Console.WriteLine("  set stats 100       - Max out happiness, health, smarts and looks");
+        Console.WriteLine("  set looks 50        - Set looks to 50%");
     }
 
     public string GetHelp() => "help - Show available commands";
