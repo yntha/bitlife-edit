@@ -1439,7 +1439,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
         Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
         Console.WriteLine("  items <kind>        - List items with a 0-100 stat: casinoacts, casinorooms, zoohabitats, zoofeatures,");
-        Console.WriteLine("                        zooattractions, zooemployees, zoopopularity, zoohappiness, zoohealth (animals)");
+        Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals)");
         Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
@@ -1656,9 +1656,7 @@ public static class ItemLists
         ["zoofeatures"] = new(l => Zoo(l, "HabitatsList"), o => Str(o, "Name"), o => Refl.Get(o, "Feature"), "_condition"),
         ["zooattractions"] = new(l => Zoo(l, "AttractionsList"), o => Str(o, "Type"), Self, "_engagementScore"),
         ["zooemployees"] = new(l => Zoo(l, "EmployeesList"), PersonName, Self, "Att_competence"),
-        ["zoopopularity"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_popularityNoZoo"),
-        ["zoohappiness"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_happinessNoZoo"),
-        ["zoohealth"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_healthNoZoo"),
+        ["zoohealthbuff"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_healthBuff"),     // each animal's health buff
     };
 
     public static List<object> List(Life life, Kind kind)
