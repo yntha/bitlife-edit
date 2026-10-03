@@ -1116,7 +1116,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "zoosupplierquality", "zooperformance", "zoofunds", "zooadmission", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1173,6 +1173,12 @@ public class ProfileFieldHandler : IFieldHandler
                     Add("Gamblers", role.Length > 0 ? role : "Gambler", gambler);
                 }
 
+        // zoo staff: people too (role = their job, from the type name: SimZooOperationsManager -> Operations Manager)
+        if (Refl.Get(life, "Zoo") is object zoo && Refl.Get(zoo, "EmployeesList") is System.Collections.IEnumerable staff)
+            foreach (object? member in staff)
+                if (member != null)
+                    Add("Zoo staff", System.Text.RegularExpressions.Regex.Replace(member.GetType().Name.Replace("SimZoo", ""), "(?<=[a-z])(?=[A-Z])", " "), member);
+
         Add("Casino staff", "Artist-in-Residence", Refl.Get(life, "Casino") is object cc ? Refl.Get(cc, "_celebrity") : null);
 
         if (Refl.Get(life, "Occupation") is object occupation)
@@ -1218,6 +1224,11 @@ public class ProfileFieldHandler : IFieldHandler
             // your own casino (Life.Casino exists only while you own one)
             "casinopopularity" => (Refl.Get(life, "Casino"), "_popularity"),
             "casinofunds" => (Refl.Get(life, "Casino"), "BankBalance"),             // "Available Funds" on its profile
+            // your zoo (Life.Zoo exists only while you own one)
+            "zoosupplierquality" => (Refl.Get(life, "Zoo") is object zs ? Refl.Get(zs, "Supplier") : null, "QualityLevel"),    // "Animal Food Supplier: Quality"
+            "zooperformance" => (Refl.Get(life, "Zoo"), "_baselineHeroPerformanceScore"),   // the base of "You (Owner): Performance" (the bar adds other factors)
+            "zoofunds" => (Refl.Get(life, "Zoo"), "BankBalance"),
+            "zooadmission" => (Refl.Get(life, "Zoo"), "AdmissionFee"),
             "artistpopularity" => (Refl.Get(life, "Casino") is object cz ? Refl.Get(cz, "_celebrity") : null, "_popularity"),   // the Artist-in-Residence
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
@@ -1279,8 +1290,8 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
-        if (fieldName == "casinofunds") value = Math.Max(Convert.ToDouble(value), 0d);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity" or "zoosupplierquality" or "zooperformance") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "casinofunds" or "zoofunds" or "zooadmission") value = Math.Max(Convert.ToDouble(value), 0d);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1427,7 +1438,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  act <id> <0-100> <activity name> - Set one activity's performance");
         Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
         Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
-        Console.WriteLine("  items <casinoacts|casinorooms> - List the casino's entertainment acts / game rooms with their popularity");
+        Console.WriteLine("  items <kind>        - List items with a 0-100 stat: casinoacts, casinorooms, zoohabitats, zoofeatures,");
+        Console.WriteLine("                        zooattractions, zooemployees, zoopopularity, zoohappiness, zoohealth (animals)");
         Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
@@ -1449,6 +1461,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  modelingskill, actingskill, dealingskill - Lesson/experience skill (0-100); once you have taken them");
         Console.WriteLine("  casinopopularity (0-100), casinofunds - Your casino's Popularity and Available Funds; only while you own one");
         Console.WriteLine("  artistpopularity           - Popularity of your casino's Artist-in-Residence (0-100)");
+        Console.WriteLine("  zoosupplierquality, zooperformance (0-100), zoofunds, zooadmission - Your zoo; only while you own one");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
@@ -1604,17 +1617,48 @@ public class InstrCommand : IReplCommand
 }
 
 // A "kind" is a list of named things on the save that each carry one 0-100 stat. New kinds are one table row.
+//   Source: the items. Name: how an item is labelled and matched. Owner: the object holding the stat (the item itself, or
+//   something inside it; null = this item has none and is skipped, so ids stay aligned). ValueField: the stat.
 public static class ItemLists
 {
-    public record Kind(Func<Life, System.Collections.IEnumerable?> Source, string NameField, string ValueField);
+    public record Kind(Func<Life, System.Collections.IEnumerable?> Source, Func<object, string> Name, Func<object, object?> Owner, string ValueField);
 
-    private static System.Collections.IEnumerable? CasinoList(Life life, string field) =>
-        Refl.Get(life, "Casino") is object casino ? Refl.Get(casino, field) as System.Collections.IEnumerable : null;
+    private static string Str(object o, string field) => Refl.Get(o, field)?.ToString() ?? "?";
+
+    private static string PersonName(object p) =>
+        Refl.Get(p, "Name") is object n ? $"{Refl.Get(n, "FirstName")} {Refl.Get(n, "LastName")}".Trim() : "?";
+
+    private static object? Self(object o) => o;
+
+    private static System.Collections.IEnumerable? In(object? owner, string field) =>
+        owner == null ? null : Refl.Get(owner, field) as System.Collections.IEnumerable;
+
+    private static System.Collections.IEnumerable? Casino(Life life, string field) => In(Refl.Get(life, "Casino"), field);
+    private static System.Collections.IEnumerable? Zoo(Life life, string field) => In(Refl.Get(life, "Zoo"), field);
+
+    // every animal in every habitat
+    private static System.Collections.IEnumerable? ZooAnimals(Life life)
+    {
+        var animals = new List<object>();
+        if (Zoo(life, "HabitatsList") is System.Collections.IEnumerable habitats)
+            foreach (object? h in habitats)
+                if (In(h, "AnimalsList") is System.Collections.IEnumerable list)
+                    foreach (object? a in list)
+                        if (a != null) animals.Add(a);
+        return animals;
+    }
 
     public static readonly Dictionary<string, Kind> Kinds = new()
     {
-        ["casinoacts"] = new(l => CasinoList(l, "_entertainmentActs"), "Name", "_popularity"),   // entertainment acts you hired
-        ["casinorooms"] = new(l => CasinoList(l, "_gameRooms"), "Name", "_popularity"),          // the casino's game rooms
+        ["casinoacts"] = new(l => Casino(l, "_entertainmentActs"), o => Str(o, "Name"), Self, "_popularity"),
+        ["casinorooms"] = new(l => Casino(l, "_gameRooms"), o => Str(o, "Name"), Self, "_popularity"),
+        ["zoohabitats"] = new(l => Zoo(l, "HabitatsList"), o => Str(o, "Name"), Self, "CleanCondition"),
+        ["zoofeatures"] = new(l => Zoo(l, "HabitatsList"), o => Str(o, "Name"), o => Refl.Get(o, "Feature"), "_condition"),
+        ["zooattractions"] = new(l => Zoo(l, "AttractionsList"), o => Str(o, "Type"), Self, "_engagementScore"),
+        ["zooemployees"] = new(l => Zoo(l, "EmployeesList"), PersonName, Self, "Att_competence"),
+        ["zoopopularity"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_popularityNoZoo"),
+        ["zoohappiness"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_happinessNoZoo"),
+        ["zoohealth"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_healthNoZoo"),
     };
 
     public static List<object> List(Life life, Kind kind)
@@ -1622,11 +1666,11 @@ public static class ItemLists
         var result = new List<object>();
         if (kind.Source(life) is System.Collections.IEnumerable items)
             foreach (object? i in items)
-                if (i != null) result.Add(i);
+                if (i != null && kind.Owner(i) != null) result.Add(i);
         return result;
     }
 
-    public static string NameOf(object item, Kind kind) => Refl.Get(item, kind.NameField)?.ToString() ?? "?";
+    public static double ValueOf(object item, Kind kind) => Convert.ToDouble(Refl.Get(kind.Owner(item)!, kind.ValueField) ?? 0);
 }
 
 public class ItemsCommand : IReplCommand
@@ -1642,11 +1686,11 @@ public class ItemsCommand : IReplCommand
 
         var list = ItemLists.List(context.SaveData, kind);
         for (int i = 0; i < list.Count; i++)
-            Console.WriteLine($"item|{args[0].ToLower()}|{i}|{ItemLists.NameOf(list[i], kind)}|{Math.Round(Convert.ToDouble(Refl.Get(list[i], kind.ValueField) ?? 0))}");
+            Console.WriteLine($"item|{args[0].ToLower()}|{i}|{kind.Name(list[i])}|{Math.Round(ItemLists.ValueOf(list[i], kind))}");
         if (list.Count == 0) Console.WriteLine($"No {args[0]} found.");
     }
 
-    public string GetHelp() => "items <kind> - List the casino's entertainment acts (casinoacts) or game rooms (casinorooms) with their popularity";
+    public string GetHelp() => "items <kind> - List the items of a kind (casinoacts, casinorooms, zoohabitats, ...) with their stat";
 }
 
 public class SetItemCommand : IReplCommand
@@ -1667,10 +1711,10 @@ public class SetItemCommand : IReplCommand
         var list = ItemLists.List(context.SaveData, kind);
 
         object? item = null;
-        if (index >= 0 && index < list.Count && ItemLists.NameOf(list[index], kind) == name) item = list[index];
+        if (index >= 0 && index < list.Count && kind.Name(list[index]) == name) item = list[index];
         else
         {
-            var matches = list.Where(x => ItemLists.NameOf(x, kind) == name).ToList();
+            var matches = list.Where(x => kind.Name(x) == name).ToList();
             if (matches.Count == 1) item = matches[0];
         }
 
@@ -1681,7 +1725,7 @@ public class SetItemCommand : IReplCommand
         }
 
         float v = Math.Clamp(value, 0f, 100f);
-        Refl.Set(item, kind.ValueField, v);
+        Refl.Set(kind.Owner(item)!, kind.ValueField, v);
         Console.WriteLine($"Set {args[0].ToLower()} {name} to: {v}");
     }
 
