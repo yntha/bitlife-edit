@@ -1114,7 +1114,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1160,6 +1160,17 @@ public class ProfileFieldHandler : IFieldHandler
                 if (person != null) Add(group, role, person);
         }
 
+        // your casino's regulars: a person each, with the gambling style as their role
+        if (Refl.Get(life, "Casino") is object casino && Refl.Get(casino, "_gamblers") is System.Collections.IEnumerable gamblers)
+            foreach (object? gambler in gamblers)
+                if (gambler != null)
+                {
+                    string style = Refl.Get(gambler, "GamblingStyle")?.ToString() ?? "";
+                    string role = string.Join(' ', style.ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Gamblers", role.Length > 0 ? role : "Gambler", gambler);
+                }
+
         if (Refl.Get(life, "Occupation") is object occupation)
         {
             object? school = Refl.Get(occupation, "School");          // only a student occupation has one
@@ -1200,6 +1211,9 @@ public class ProfileFieldHandler : IFieldHandler
             "modelingskill" => (Refl.Get(life, "ModelLessonExperience"), "Att_skill"),
             "actingskill" => (Refl.Get(life, "ActingLessonExperience"), "Att_skill"),
             "dealingskill" => (Refl.Get(life, "DealingExperience"), "Att_skill"),
+            // your own casino (Life.Casino exists only while you own one)
+            "casinopopularity" => (Refl.Get(life, "Casino"), "_popularity"),
+            "casinofunds" => (Refl.Get(life, "Casino"), "BankBalance"),             // "Available Funds" on its profile
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
         };
@@ -1260,7 +1274,8 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName == "casinofunds") value = Math.Max(Convert.ToDouble(value), 0d);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1425,6 +1440,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  jobperformance             - Job performance (0-100); only while employed");
         Console.WriteLine("  advisorreputation, agentreputation - Reputation of your financial advisor / talent agent (0-100)");
         Console.WriteLine("  modelingskill, actingskill, dealingskill - Lesson/experience skill (0-100); once you have taken them");
+        Console.WriteLine("  casinopopularity (0-100), casinofunds - Your casino's Popularity and Available Funds; only while you own one");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
