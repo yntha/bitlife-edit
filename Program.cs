@@ -1118,7 +1118,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "zoosupplierquality", "zooperformance", "zoofunds", "zooadmission", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "zoosupplierquality", "zooperformance", "zoofunds", "zooadmission", "agencyprestige", "spyperformance", "spycover", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1181,6 +1181,16 @@ public class ProfileFieldHandler : IFieldHandler
                 if (member != null)
                     Add("Zoo staff", System.Text.RegularExpressions.Regex.Replace(member.GetType().Name.Replace("SimZoo", ""), "(?<=[a-z])(?=[A-Z])", " "), member);
 
+        // your secret agents: people too (role = their rank)
+        if (Refl.Get(life, "SpyAgency") is object agency && Refl.Get(agency, "_agentsList") is System.Collections.IEnumerable agents)
+            foreach (object? agent in agents)
+                if (agent != null)
+                {
+                    string rank = string.Join(' ', (Refl.Get(agent, "Rank")?.ToString() ?? "").ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Agents", rank.Length > 0 ? rank : "Agent", agent);
+                }
+
         Add("Casino staff", "Artist-in-Residence", Refl.Get(life, "Casino") is object cc ? Refl.Get(cc, "_celebrity") : null);
 
         if (Refl.Get(life, "Occupation") is object occupation)
@@ -1231,6 +1241,10 @@ public class ProfileFieldHandler : IFieldHandler
             "zooperformance" => (Refl.Get(life, "Zoo"), "_baselineHeroPerformanceScore"),   // the base of "You (Owner): Performance" (the bar adds other factors)
             "zoofunds" => (Refl.Get(life, "Zoo"), "BankBalance"),
             "zooadmission" => (Refl.Get(life, "Zoo"), "AdmissionFee"),
+            // your secret agency (Life.SpyAgency exists only while you run one)
+            "agencyprestige" => (Refl.Get(life, "SpyAgency"), "Prestige"),
+            "spyperformance" => (Refl.Get(life, "SpyAgency"), "HeroPerformanceIndex"),   // the base of "You (Spymaster): Performance"
+            "spycover" => (Refl.Get(life, "SpyAgency") is object sy ? Refl.Get(sy, "Front") : null, "Location"),   // the front business's "Cover" bar
             "artistpopularity" => (Refl.Get(life, "Casino") is object cz ? Refl.Get(cz, "_celebrity") : null, "_popularity"),   // the Artist-in-Residence
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
@@ -1292,7 +1306,7 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity" or "zoosupplierquality" or "zooperformance") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity" or "zoosupplierquality" or "zooperformance" or "agencyprestige" or "spyperformance" or "spycover") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
         if (fieldName is "casinofunds" or "zoofunds" or "zooadmission") value = Math.Max(Convert.ToDouble(value), 0d);
 
         // the name object keeps a second copy of the first name
@@ -1441,7 +1455,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
         Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
         Console.WriteLine("  items <kind>        - List items with a 0-100 stat: casinoacts, casinorooms, zoohabitats, zoofeatures,");
-        Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals)");
+        Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals), spyagents, spygadgets, spysecurity");
         Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
         Console.WriteLine("  assets              - List the portfolio's stock and crypto holdings");
         Console.WriteLine("  setasset <id> <quantity> <name> - Set how much of one you hold (cost basis follows)");
@@ -1466,6 +1480,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  casinopopularity (0-100), casinofunds - Your casino's Popularity and Available Funds; only while you own one");
         Console.WriteLine("  artistpopularity           - Popularity of your casino's Artist-in-Residence (0-100)");
         Console.WriteLine("  zoosupplierquality, zooperformance (0-100), zoofunds, zooadmission - Your zoo; only while you own one");
+        Console.WriteLine("  agencyprestige, spyperformance, spycover (0-100) - Your secret agency's Prestige, your performance base and its front's Cover");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
@@ -1639,6 +1654,7 @@ public static class ItemLists
 
     private static System.Collections.IEnumerable? Casino(Life life, string field) => In(Refl.Get(life, "Casino"), field);
     private static System.Collections.IEnumerable? Zoo(Life life, string field) => In(Refl.Get(life, "Zoo"), field);
+    private static System.Collections.IEnumerable? Spy(Life life, string field) => In(Refl.Get(life, "SpyAgency"), field);
 
     // every animal in every habitat
     private static System.Collections.IEnumerable? ZooAnimals(Life life)
@@ -1660,6 +1676,9 @@ public static class ItemLists
         ["zoofeatures"] = new(l => Zoo(l, "HabitatsList"), o => Str(o, "Name"), o => Refl.Get(o, "Feature"), "_condition"),
         ["zooattractions"] = new(l => Zoo(l, "AttractionsList"), o => Str(o, "Type"), Self, "_engagementScore"),
         ["zooemployees"] = new(l => Zoo(l, "EmployeesList"), PersonName, Self, "Att_competence"),
+        ["spyagents"] = new(l => Spy(l, "_agentsList"), PersonName, Self, "Proficiency"),           // each agent's proficiency
+        ["spygadgets"] = new(l => Spy(l, "GadgetsList"), o => Str(o, "Name"), Self, "Condition"),
+        ["spysecurity"] = new(l => Spy(l, "SecurityFeaturesList"), o => Str(o, "Name"), Self, "Condition"),
         ["zoohealthbuff"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_healthBuff"),     // each animal's health buff
     };
 
