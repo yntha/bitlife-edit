@@ -722,6 +722,8 @@ public class BitLifeRepl
         commands["instruments"] = new InstrumentsCommand();
         commands["instr"] = new InstrCommand();
         commands["items"] = new ItemsCommand();
+        commands["assets"] = new AssetsCommand();
+        commands["setasset"] = new SetAssetCommand();
         commands["setitem"] = new SetItemCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
@@ -1441,6 +1443,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  items <kind>        - List items with a 0-100 stat: casinoacts, casinorooms, zoohabitats, zoofeatures,");
         Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals)");
         Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
+        Console.WriteLine("  assets              - List the portfolio's stock and crypto holdings");
+        Console.WriteLine("  setasset <id> <quantity> <name> - Set how much of one you hold (cost basis follows)");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1728,6 +1732,77 @@ public class SetItemCommand : IReplCommand
     }
 
     public string GetHelp() => "setitem <kind> <id> <0-100> <name> - Set one item's stat";
+}
+
+// the portfolio's stocks and crypto: the game values a holding at (quantity x market price), so the quantity is the lever
+public static class Holdings
+{
+    public static List<object> List(Life life)
+    {
+        var result = new List<object>();
+        if (Refl.Get(life, "_Portfolio") is object portfolio && Refl.Get(portfolio, "Assets") is System.Collections.IEnumerable assets)
+            foreach (object? a in assets)
+                if (a != null && Convert.ToInt32(Refl.Get(a, "AssetType") ?? 0) is 1 or 2) result.Add(a);   // 1 = stock, 2 = crypto
+        return result;
+    }
+
+    public static string NameOf(object holding) => Refl.Get(holding, "Name")?.ToString() ?? "?";
+    public static string Num(double v) => v.ToString("0.############", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+public class AssetsCommand : IReplCommand
+{
+    // one line per holding: asset|<id>|<name>|<type>|<quantity>|<average cost per unit>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var list = Holdings.List(context.SaveData);
+        for (int i = 0; i < list.Count; i++)
+            Console.WriteLine($"asset|{i}|{Holdings.NameOf(list[i])}|{Refl.Get(list[i], "AssetType")}|{Holdings.Num(Convert.ToDouble(Refl.Get(list[i], "Quantity") ?? 0))}|{Holdings.Num(Convert.ToDouble(Refl.Get(list[i], "AverageCost") ?? 0))}");
+        if (list.Count == 0) Console.WriteLine("No stock or crypto holdings found.");
+    }
+
+    public string GetHelp() => "assets - List the portfolio's stock and crypto holdings (name, type, quantity, average cost)";
+}
+
+public class SetAssetCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double quantity)
+            || double.IsNaN(quantity) || double.IsInfinity(quantity))
+        {
+            Console.WriteLine("Usage: setasset <id> <quantity> <name>   (ids and names come from 'assets')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(2));
+        var list = Holdings.List(context.SaveData);
+
+        object? holding = null;
+        if (index >= 0 && index < list.Count && Holdings.NameOf(list[index]) == name) holding = list[index];
+        else
+        {
+            var matches = list.Where(h => Holdings.NameOf(h) == name).ToList();
+            if (matches.Count == 1) holding = matches[0];
+        }
+
+        if (holding == null)
+        {
+            Console.WriteLine($"Could not set holding: {name}");
+            return;
+        }
+
+        quantity = Math.Clamp(quantity, 0d, 1e15);
+        Refl.Set(holding, "Quantity", quantity);
+        // keep the cost basis consistent, as if you had bought that many at your average price (no phantom gain to tax)
+        Refl.Set(holding, "TotalUntaxedInvestment", quantity * Convert.ToDouble(Refl.Get(holding, "AverageCost") ?? 0));
+        Console.WriteLine($"Set holding {name} to: {Holdings.Num(quantity)}");
+    }
+
+    public string GetHelp() => "setasset <id> <quantity> <name> - Set how much of a stock or crypto you hold";
 }
 
 public class PeopleCommand : IReplCommand
