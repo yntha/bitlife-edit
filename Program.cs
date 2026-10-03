@@ -721,6 +721,8 @@ public class BitLifeRepl
         commands["act"] = new ActCommand();
         commands["instruments"] = new InstrumentsCommand();
         commands["instr"] = new InstrCommand();
+        commands["items"] = new ItemsCommand();
+        commands["setitem"] = new SetItemCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
         commands["exit"] = new QuitCommand();
@@ -1114,7 +1116,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1171,6 +1173,8 @@ public class ProfileFieldHandler : IFieldHandler
                     Add("Gamblers", role.Length > 0 ? role : "Gambler", gambler);
                 }
 
+        Add("Casino staff", "Artist-in-Residence", Refl.Get(life, "Casino") is object cc ? Refl.Get(cc, "_celebrity") : null);
+
         if (Refl.Get(life, "Occupation") is object occupation)
         {
             object? school = Refl.Get(occupation, "School");          // only a student occupation has one
@@ -1214,6 +1218,7 @@ public class ProfileFieldHandler : IFieldHandler
             // your own casino (Life.Casino exists only while you own one)
             "casinopopularity" => (Refl.Get(life, "Casino"), "_popularity"),
             "casinofunds" => (Refl.Get(life, "Casino"), "BankBalance"),             // "Available Funds" on its profile
+            "artistpopularity" => (Refl.Get(life, "Casino") is object cz ? Refl.Get(cz, "_celebrity") : null, "_popularity"),   // the Artist-in-Residence
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
         };
@@ -1274,7 +1279,7 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
         if (fieldName == "casinofunds") value = Math.Max(Convert.ToDouble(value), 0d);
 
         // the name object keeps a second copy of the first name
@@ -1422,6 +1427,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  act <id> <0-100> <activity name> - Set one activity's performance");
         Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
         Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
+        Console.WriteLine("  items <casinoacts|casinorooms> - List the casino's entertainment acts / game rooms with their popularity");
+        Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1441,6 +1448,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  advisorreputation, agentreputation - Reputation of your financial advisor / talent agent (0-100)");
         Console.WriteLine("  modelingskill, actingskill, dealingskill - Lesson/experience skill (0-100); once you have taken them");
         Console.WriteLine("  casinopopularity (0-100), casinofunds - Your casino's Popularity and Available Funds; only while you own one");
+        Console.WriteLine("  artistpopularity           - Popularity of your casino's Artist-in-Residence (0-100)");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
@@ -1593,6 +1601,91 @@ public class InstrCommand : IReplCommand
     }
 
     public string GetHelp() => "instr <id> <0-100> <instrument name> - Set one instrument's skill";
+}
+
+// A "kind" is a list of named things on the save that each carry one 0-100 stat. New kinds are one table row.
+public static class ItemLists
+{
+    public record Kind(Func<Life, System.Collections.IEnumerable?> Source, string NameField, string ValueField);
+
+    private static System.Collections.IEnumerable? CasinoList(Life life, string field) =>
+        Refl.Get(life, "Casino") is object casino ? Refl.Get(casino, field) as System.Collections.IEnumerable : null;
+
+    public static readonly Dictionary<string, Kind> Kinds = new()
+    {
+        ["casinoacts"] = new(l => CasinoList(l, "_entertainmentActs"), "Name", "_popularity"),   // entertainment acts you hired
+        ["casinorooms"] = new(l => CasinoList(l, "_gameRooms"), "Name", "_popularity"),          // the casino's game rooms
+    };
+
+    public static List<object> List(Life life, Kind kind)
+    {
+        var result = new List<object>();
+        if (kind.Source(life) is System.Collections.IEnumerable items)
+            foreach (object? i in items)
+                if (i != null) result.Add(i);
+        return result;
+    }
+
+    public static string NameOf(object item, Kind kind) => Refl.Get(item, kind.NameField)?.ToString() ?? "?";
+}
+
+public class ItemsCommand : IReplCommand
+{
+    // items <kind>  ->  one line per item: item|<kind>|<id>|<name>|<value>
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 1 || !ItemLists.Kinds.TryGetValue(args[0].ToLower(), out var kind))
+        {
+            Console.WriteLine($"Usage: items <{string.Join('|', ItemLists.Kinds.Keys)}>");
+            return;
+        }
+
+        var list = ItemLists.List(context.SaveData, kind);
+        for (int i = 0; i < list.Count; i++)
+            Console.WriteLine($"item|{args[0].ToLower()}|{i}|{ItemLists.NameOf(list[i], kind)}|{Math.Round(Convert.ToDouble(Refl.Get(list[i], kind.ValueField) ?? 0))}");
+        if (list.Count == 0) Console.WriteLine($"No {args[0]} found.");
+    }
+
+    public string GetHelp() => "items <kind> - List the casino's entertainment acts (casinoacts) or game rooms (casinorooms) with their popularity";
+}
+
+public class SetItemCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 4
+            || !ItemLists.Kinds.TryGetValue(args[0].ToLower(), out var kind)
+            || !int.TryParse(args[1], out int index)
+            || !float.TryParse(args[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine($"Usage: setitem <{string.Join('|', ItemLists.Kinds.Keys)}> <id> <0-100> <name>   (ids and names come from 'items')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(3));
+        var list = ItemLists.List(context.SaveData, kind);
+
+        object? item = null;
+        if (index >= 0 && index < list.Count && ItemLists.NameOf(list[index], kind) == name) item = list[index];
+        else
+        {
+            var matches = list.Where(x => ItemLists.NameOf(x, kind) == name).ToList();
+            if (matches.Count == 1) item = matches[0];
+        }
+
+        if (item == null)
+        {
+            Console.WriteLine($"Could not set item: {name}");
+            return;
+        }
+
+        float v = Math.Clamp(value, 0f, 100f);
+        Refl.Set(item, kind.ValueField, v);
+        Console.WriteLine($"Set {args[0].ToLower()} {name} to: {v}");
+    }
+
+    public string GetHelp() => "setitem <kind> <id> <0-100> <name> - Set one item's stat";
 }
 
 public class PeopleCommand : IReplCommand
