@@ -719,6 +719,8 @@ public class BitLifeRepl
         commands["rel"] = new RelCommand();
         commands["activities"] = new ActivitiesCommand();
         commands["act"] = new ActCommand();
+        commands["instruments"] = new InstrumentsCommand();
+        commands["instr"] = new InstrCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
         commands["exit"] = new QuitCommand();
@@ -1112,7 +1114,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1194,6 +1196,10 @@ public class ProfileFieldHandler : IFieldHandler
             "jobperformance" => (Refl.Get(life, "Occupation"), "Att_performance"),  // only an employee occupation has this
             "advisorreputation" => (Refl.Get(life, "_Portfolio") is object pf ? Refl.Get(pf, "FinancialAdvisor") : null, "Att_reputation"),
             "agentreputation" => (Refl.Get(life, "TalentAgent"), "Att_reputation"),
+            // lesson skills: each object only exists once you've taken that kind of lesson
+            "modelingskill" => (Refl.Get(life, "ModelLessonExperience"), "Att_skill"),
+            "actingskill" => (Refl.Get(life, "ActingLessonExperience"), "Att_skill"),
+            "dealingskill" => (Refl.Get(life, "DealingExperience"), "Att_skill"),
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
         };
@@ -1254,7 +1260,7 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1399,6 +1405,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  rel <id> <0-100> <full name> - Set one person's relationship strength");
         Console.WriteLine("  activities          - List school activities (teams, clubs) with their performance");
         Console.WriteLine("  act <id> <0-100> <activity name> - Set one activity's performance");
+        Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
+        Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1416,6 +1424,7 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  grades, popularity         - School stats (0-100); only while in school");
         Console.WriteLine("  jobperformance             - Job performance (0-100); only while employed");
         Console.WriteLine("  advisorreputation, agentreputation - Reputation of your financial advisor / talent agent (0-100)");
+        Console.WriteLine("  modelingskill, actingskill, dealingskill - Lesson/experience skill (0-100); once you have taken them");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
@@ -1501,6 +1510,73 @@ public class ActCommand : IReplCommand
     }
 
     public string GetHelp() => "act <id> <0-100> <activity name> - Set one school activity's performance";
+}
+
+// the musical instruments you play (voice lessons count as an instrument called "voice"), each with a Skill
+public static class Instruments
+{
+    public static List<object> List(Life life)
+    {
+        var result = new List<object>();
+        if (Refl.Get(life, "_InstrumentArray") is System.Collections.IEnumerable items)
+            foreach (object? i in items)
+                if (i != null) result.Add(i);
+        return result;
+    }
+
+    public static string NameOf(object instrument) => Refl.Get(instrument, "InstrumentName")?.ToString() ?? "?";
+}
+
+public class InstrumentsCommand : IReplCommand
+{
+    // one line per instrument: instrument|<id>|<name>|<skill>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var list = Instruments.List(context.SaveData);
+        for (int i = 0; i < list.Count; i++)
+            Console.WriteLine($"instrument|{i}|{Instruments.NameOf(list[i])}|{Math.Round(Convert.ToDouble(Refl.Get(list[i], "Att_skill") ?? 0))}");
+        if (list.Count == 0) Console.WriteLine("No instruments found.");
+    }
+
+    public string GetHelp() => "instruments - List the instruments (and voice lessons) with their skill";
+}
+
+public class InstrCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !float.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine("Usage: instr <id> <0-100> <instrument name>   (ids and names come from 'instruments')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(2));
+        var list = Instruments.List(context.SaveData);
+
+        object? instrument = null;
+        if (index >= 0 && index < list.Count && Instruments.NameOf(list[index]) == name) instrument = list[index];
+        else
+        {
+            var matches = list.Where(i => Instruments.NameOf(i) == name).ToList();
+            if (matches.Count == 1) instrument = matches[0];
+        }
+
+        if (instrument == null)
+        {
+            Console.WriteLine($"Could not set instrument: {name}");
+            return;
+        }
+
+        float v = Math.Clamp(value, 0f, 100f);
+        Refl.Set(instrument, "Att_skill", v);
+        Console.WriteLine($"Set skill of {name} to: {v}");
+    }
+
+    public string GetHelp() => "instr <id> <0-100> <instrument name> - Set one instrument's skill";
 }
 
 public class PeopleCommand : IReplCommand
