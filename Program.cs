@@ -1118,7 +1118,7 @@ public class ProfileFieldHandler : IFieldHandler
     private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
 
     public string[] SupportedFields => new[] {
-        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "zoosupplierquality", "zooperformance", "zoofunds", "zooadmission", "agencyprestige", "spyperformance", "spycover", "relationships", "diseases", "addictions"
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "zoosupplierquality", "zooperformance", "zoofunds", "zooadmission", "agencyprestige", "spyperformance", "spycover", "cultname", "cultleader", "cultfollowers", "cultreputation", "cultloyalty", "cultjoinfee", "cultannualfee", "pitcrewcompetence", "relationships", "diseases", "addictions"
     }.Concat(lifeFields.Keys).ToArray();
 
     public record RosterEntry(string Group, string Role, object Person);
@@ -1191,6 +1191,26 @@ public class ProfileFieldHandler : IFieldHandler
                     Add("Agents", rank.Length > 0 ? rank : "Agent", agent);
                 }
 
+        // racing drivers you know: people too (role = their licence)
+        if (Refl.Get(life, "Racing") is object racing && Refl.Get(racing, "_activeDrivers") is System.Collections.IEnumerable drivers)
+            foreach (object? driver in drivers)
+                if (driver != null)
+                {
+                    string lic = string.Join(' ', (Refl.Get(driver, "License")?.ToString() ?? "").ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Racing drivers", lic.Length > 0 ? lic + " driver" : "Driver", driver);
+                }
+
+        // your cult's communards: people too (role = their rank)
+        if (Cult(life) is object cult && Refl.Get(cult, "Plot") is object plot && Refl.Get(plot, "CommunardsList") is System.Collections.IEnumerable communards)
+            foreach (object? member in communards)
+                if (member != null)
+                {
+                    string rank = string.Join(' ', (Refl.Get(member, "Ranking")?.ToString() ?? "").ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Cult members", rank.Length > 0 ? rank : "Communard", member);
+                }
+
         Add("Casino staff", "Artist-in-Residence", Refl.Get(life, "Casino") is object cc ? Refl.Get(cc, "_celebrity") : null);
 
         if (Refl.Get(life, "Occupation") is object occupation)
@@ -1210,6 +1230,12 @@ public class ProfileFieldHandler : IFieldHandler
     }
 
     private static IEnumerable<object> People(Life life) => Roster(life).Select(e => e.Person);
+
+    // your cult: a SimCult hangs off the world place that holds your commune (Life._DeterministicEmigrationPlaceArray[i].Cult)
+    private static object? Cult(Life life) =>
+        Refl.Get(life, "_DeterministicEmigrationPlaceArray") is System.Collections.IEnumerable places
+            ? places.Cast<object?>().Select(pl => pl == null ? null : Refl.Get(pl, "Cult")).FirstOrDefault(c => c != null)
+            : null;
 
     // the object and field a simple field name lives on (null if the parent doesn't exist, e.g. no job)
     private static (object? Owner, string Field)? Locate(Life life, string field)
@@ -1238,13 +1264,23 @@ public class ProfileFieldHandler : IFieldHandler
             "casinofunds" => (Refl.Get(life, "Casino"), "BankBalance"),             // "Available Funds" on its profile
             // your zoo (Life.Zoo exists only while you own one)
             "zoosupplierquality" => (Refl.Get(life, "Zoo") is object zs ? Refl.Get(zs, "Supplier") : null, "QualityLevel"),    // "Animal Food Supplier: Quality"
-            "zooperformance" => (Refl.Get(life, "Zoo"), "_baselineHeroPerformanceScore"),   // the base of "You (Owner): Performance" (the bar adds other factors)
+            "zooperformance" => (Refl.Get(life, "Zoo"), "_baselineHeroPerformanceScore"),   // one input to "You (Owner): Performance"; the game adds other factors, so the bar may not follow it one-for-one
             "zoofunds" => (Refl.Get(life, "Zoo"), "BankBalance"),
             "zooadmission" => (Refl.Get(life, "Zoo"), "AdmissionFee"),
             // your secret agency (Life.SpyAgency exists only while you run one)
             "agencyprestige" => (Refl.Get(life, "SpyAgency"), "Prestige"),
-            "spyperformance" => (Refl.Get(life, "SpyAgency"), "HeroPerformanceIndex"),   // the base of "You (Spymaster): Performance"
+            "spyperformance" => (Refl.Get(life, "SpyAgency"), "HeroPerformanceIndex"),   // one input to "You (Spymaster): Performance": tested 0 -> bar ~10%, 50 and 100 -> ~40% (other factors cap it); Missions Success Rate is unaffected
             "spycover" => (Refl.Get(life, "SpyAgency") is object sy ? Refl.Get(sy, "Front") : null, "Location"),   // the front business's "Cover" bar
+            // your racing pit crew (Life.Racing.PitCrew exists once you hired one)
+            "pitcrewcompetence" => (Refl.Get(life, "Racing") is object rc ? Refl.Get(rc, "PitCrew") : null, "Competence"),
+            // your cult (exists only once you founded one)
+            "cultname" => (Cult(life), "Name"),
+            "cultleader" => (Cult(life), "LeaderHonorificName"),
+            "cultfollowers" => (Cult(life), "Followers"),
+            "cultreputation" => (Cult(life), "Reputation"),
+            "cultloyalty" => (Cult(life) is object cl ? Refl.Get(cl, "Plot") : null, "FollowerLoyalty"),   // the commune's "Follower Loyalty"
+            "cultjoinfee" => (Cult(life), "InitialMembershipFee"),
+            "cultannualfee" => (Cult(life), "AnnualMembershipFee"),
             "artistpopularity" => (Refl.Get(life, "Casino") is object cz ? Refl.Get(cz, "_celebrity") : null, "_popularity"),   // the Artist-in-Residence
             _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
             _ => null,
@@ -1306,8 +1342,9 @@ public class ProfileFieldHandler : IFieldHandler
             else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
         }
 
-        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity" or "zoosupplierquality" or "zooperformance" or "agencyprestige" or "spyperformance" or "spycover") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
-        if (fieldName is "casinofunds" or "zoofunds" or "zooadmission") value = Math.Max(Convert.ToDouble(value), 0d);
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity" or "zoosupplierquality" or "zooperformance" or "agencyprestige" or "spyperformance" or "spycover" or "cultreputation" or "cultloyalty" or "pitcrewcompetence") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName == "cultfollowers") value = Math.Clamp(Convert.ToInt64(value), 0L, 2_000_000_000L);
+        if (fieldName is "casinofunds" or "zoofunds" or "zooadmission" or "cultjoinfee" or "cultannualfee") value = Math.Max(Convert.ToDouble(value), 0d);
 
         // the name object keeps a second copy of the first name
         if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
@@ -1455,7 +1492,8 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
         Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
         Console.WriteLine("  items <kind>        - List items with a 0-100 stat: casinoacts, casinorooms, zoohabitats, zoofeatures,");
-        Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals), spyagents, spygadgets, spysecurity");
+        Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals), spyagents, spygadgets, spysecurity,");
+        Console.WriteLine("                        luxurycharities, luxuryislands, racingdrivers, racingspeed, racingacceleration, racinghandling, racingdurability");
         Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
         Console.WriteLine("  assets              - List the portfolio's stock and crypto holdings");
         Console.WriteLine("  setasset <id> <quantity> <name> - Set how much of one you hold (cost basis follows)");
@@ -1479,8 +1517,10 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("  modelingskill, actingskill, dealingskill - Lesson/experience skill (0-100); once you have taken them");
         Console.WriteLine("  casinopopularity (0-100), casinofunds - Your casino's Popularity and Available Funds; only while you own one");
         Console.WriteLine("  artistpopularity           - Popularity of your casino's Artist-in-Residence (0-100)");
-        Console.WriteLine("  zoosupplierquality, zooperformance (0-100), zoofunds, zooadmission - Your zoo; only while you own one");
-        Console.WriteLine("  agencyprestige, spyperformance, spycover (0-100) - Your secret agency's Prestige, your performance base and its front's Cover");
+        Console.WriteLine("  zoosupplierquality, zooperformance (0-100), zoofunds, zooadmission - Your zoo; only while you own one (zooperformance is one input to your Performance bar, not the whole bar)");
+        Console.WriteLine("  pitcrewcompetence (0-100) - Your racing pit crew; only once you hired one");
+        Console.WriteLine("  cultname, cultleader, cultfollowers, cultreputation (0-100), cultloyalty (0-100), cultjoinfee, cultannualfee - Your cult; only once you founded one");
+        Console.WriteLine("  agencyprestige, spyperformance, spycover (0-100) - Your secret agency's Prestige, an input to your Performance bar (it stops mattering around 50) and its front's Cover");
         Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
         Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
         Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
@@ -1655,6 +1695,15 @@ public static class ItemLists
     private static System.Collections.IEnumerable? Casino(Life life, string field) => In(Refl.Get(life, "Casino"), field);
     private static System.Collections.IEnumerable? Zoo(Life life, string field) => In(Refl.Get(life, "Zoo"), field);
     private static System.Collections.IEnumerable? Spy(Life life, string field) => In(Refl.Get(life, "SpyAgency"), field);
+    private static System.Collections.IEnumerable? Luxury(Life life, string field) => In(Refl.Get(life, "Luxury"), field);
+    private static System.Collections.IEnumerable? Racing(Life life, string field) => In(Refl.Get(life, "Racing"), field);
+
+    // the race cars in your garage (a SimRaceCar wraps the SimCar, which holds the make, model and the racing stats)
+    private static System.Collections.IEnumerable? GarageCars(Life life) =>
+        In(Refl.Get(life, "Racing") is object r ? Refl.Get(r, "Garage") : null, "_raceCars");
+    private static object? CarDetails(object raceCar) => Refl.Get(raceCar, "_simCar") is object car ? Refl.Get(car, "RaceCarDetails") : null;
+    private static string CarName(object raceCar) =>
+        Refl.Get(raceCar, "_simCar") is object car ? $"{Str(car, "_Make")} {Str(car, "_Model")}".Trim() : "?";
 
     // every animal in every habitat
     private static System.Collections.IEnumerable? ZooAnimals(Life life)
@@ -1679,6 +1728,13 @@ public static class ItemLists
         ["spyagents"] = new(l => Spy(l, "_agentsList"), PersonName, Self, "Proficiency"),           // each agent's proficiency
         ["spygadgets"] = new(l => Spy(l, "GadgetsList"), o => Str(o, "Name"), Self, "Condition"),
         ["spysecurity"] = new(l => Spy(l, "SecurityFeaturesList"), o => Str(o, "Name"), Self, "Condition"),
+        ["luxurycharities"] = new(l => Luxury(l, "_charities"), o => Str(o, "Name"), Self, "_reputation"),
+        ["luxuryislands"] = new(l => Luxury(l, "_ownedIslands"), o => Str(o, "Name"), o => Refl.Get(o, "Structure"), "_condition"),   // the island's structure
+        ["racingdrivers"] = new(l => Racing(l, "_activeDrivers"), PersonName, Self, "_skill"),
+        ["racingspeed"] = new(GarageCars, CarName, CarDetails, "_baseSpeed"),
+        ["racingacceleration"] = new(GarageCars, CarName, CarDetails, "_baseAcceleration"),
+        ["racinghandling"] = new(GarageCars, CarName, CarDetails, "_baseHandling"),
+        ["racingdurability"] = new(GarageCars, CarName, CarDetails, "_baseDurability"),
         ["zoohealthbuff"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_healthBuff"),     // each animal's health buff
     };
 
