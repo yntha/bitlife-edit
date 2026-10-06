@@ -77,7 +77,7 @@ public class Program
 #pragma warning disable SYSLIB0011
             BinaryFormatter binaryFormatter = new();
             // binaryFormatter.SurrogateSelector = new PermissiveSurrogateSelector();
-            // binaryFormatter.Binder = new PermissiveSerializationBinder();
+            binaryFormatter.Binder = new MonoSerializationBinder();
 #pragma warning restore SYSLIB0011
             deserialized = binaryFormatter.Deserialize(memoryStream);
         }
@@ -110,7 +110,7 @@ public class Program
 #pragma warning disable SYSLIB0011
         BinaryFormatter binaryFormatter = new();
         //binaryFormatter.SurrogateSelector = new DebuggingSurrogateSelector();
-        //binaryFormatter.Binder = new PermissiveSerializationBinder();
+        binaryFormatter.Binder = new MonoSerializationBinder();
 #pragma warning restore SYSLIB0011
 
         return binaryFormatter.Deserialize(memoryStream);
@@ -383,7 +383,7 @@ public class Program
             // serialize to a stream
             using MemoryStream memoryStream = new();
 #pragma warning disable SYSLIB0011 // Type or member is obsolete
-            BinaryFormatter binaryFormatter = new();
+            BinaryFormatter binaryFormatter = new() { Binder = new MonoSerializationBinder() };
             binaryFormatter.Serialize(memoryStream, deserializedData);
 #pragma warning restore SYSLIB0011 // Type or member is obsolete
             File.WriteAllBytes(options.InputFile!, memoryStream.ToArray());
@@ -715,6 +715,16 @@ public class BitLifeRepl
         commands["set"] = new SetCommand();
         commands["get"] = new GetCommand();
         commands["help"] = new HelpCommand();
+        commands["people"] = new PeopleCommand();
+        commands["rel"] = new RelCommand();
+        commands["activities"] = new ActivitiesCommand();
+        commands["act"] = new ActCommand();
+        commands["instruments"] = new InstrumentsCommand();
+        commands["instr"] = new InstrCommand();
+        commands["items"] = new ItemsCommand();
+        commands["assets"] = new AssetsCommand();
+        commands["setasset"] = new SetAssetCommand();
+        commands["setitem"] = new SetItemCommand();
         commands["save"] = new SaveCommand();
         commands["quit"] = new QuitCommand();
         commands["exit"] = new QuitCommand();
@@ -788,7 +798,8 @@ public class ReplContext
         {
             new MoneyFieldHandler(),
             new AgeFieldHandler(),
-            //new HappinessFieldHandler()
+            new AttributeFieldHandler(),
+            new ProfileFieldHandler()
         };
     }
 
@@ -996,41 +1007,353 @@ public class AgeFieldHandler : IFieldHandler
     }
 }
 
-// public class HappinessFieldHandler : IFieldHandler
-// {
-//     public string[] SupportedFields => new[] {
-//         "happiness", "acting", "appearance", "athleticism",
-//         "charisma", "connection", "craziness", "dealing",
-//         "discipline", "fame", "fertility", "generosity",
-//         "health", "homo", "intelligence", "karma",
-//         "loyalty", "modeling", "music", "willness",
-//         "willpower"
-//     };
+// Hero attributes (happiness, health, smarts, looks, ...). Stored as float Att_* fields on SimPerson, 0-100.
+public class AttributeFieldHandler : IFieldHandler
+{
+    private static readonly Dictionary<string, string> aliases = new()
+    {
+        { "smarts", "intelligence" },
+        { "looks", "appearance" },
+    };
 
-//     public bool TryGetField(ReplContext context, string fieldName, out object? value)
-//     {
-//         value = context.GetProperty($"Hero.Att_{fieldName}");
-//         return value != null;
-//     }
-//     public bool TrySetField(ReplContext context, string fieldName, object value)
-//     {
-//         SimPerson val = context.SaveData.Hero;
-//         if (val is not null)
-//         {
-//             val.Att_happiness = Convert.ToInt32(value);
-//             return true;
-//         }
-//         else
-//         {
-//             return false;
-//         }
-//     }
+    // every simple Att_* attribute except money, which MoneyFieldHandler owns
+    private static readonly string[] attributes = {
+        "happiness", "health", "intelligence", "appearance", "discipline", "karma", "homo", "fertility",
+        "willpower", "wiliness", "generosity", "fame", "athleticism", "craziness", "loyalty", "connection",
+        "charisma", "music", "acting", "modeling", "dealing"
+    };
 
-//     public string GetDescription(string fieldName)
-//     {
-//         return "Character's age";
-//     }
-// }
+    // set/get several at once: "stats" = happiness, health, smarts, looks
+    private static readonly string[] mainStats = { "happiness", "health", "intelligence", "appearance" };
+
+    public string[] SupportedFields => attributes.Concat(aliases.Keys).Append("stats").ToArray();
+
+    private static FieldInfo? FindField(object hero, string attribute)
+    {
+        string name = $"<Att_{attribute}>k__BackingField";
+
+        for (Type? t = hero.GetType(); t != null; t = t.BaseType)
+        {
+            FieldInfo? f = t.GetField(name, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    public bool TryGetField(ReplContext context, string fieldName, out object? value)
+    {
+        value = null;
+        object? hero = context.SaveData.Hero;
+        if (hero == null) return false;
+
+        fieldName = fieldName.ToLower();
+        if (fieldName == "stats")
+        {
+            value = string.Join(", ", mainStats.Select(a => $"{a}={FindField(hero, a)?.GetValue(hero)}"));
+            return true;
+        }
+
+        value = FindField(hero, aliases.GetValueOrDefault(fieldName, fieldName))?.GetValue(hero);
+        return value != null;
+    }
+
+    public bool TrySetField(ReplContext context, string fieldName, object value)
+    {
+        object? hero = context.SaveData.Hero;
+        if (hero == null) return false;
+
+        fieldName = fieldName.ToLower();
+        float v = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        string[] targets = fieldName == "stats" ? mainStats : new[] { aliases.GetValueOrDefault(fieldName, fieldName) };
+
+        foreach (string attribute in targets)
+        {
+            FieldInfo? field = FindField(hero, attribute);
+            if (field == null) return false;
+            field.SetValue(hero, v);
+        }
+        return true;
+    }
+
+    public string GetDescription(string fieldName) => "Character attribute (0-100)";
+}
+
+// Reflection helpers: the dummy assemblies expose state as (auto-property) backing fields, some on base classes.
+public static class Refl
+{
+    private const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+    public static FieldInfo? Field(object obj, string name)
+    {
+        for (Type? t = obj.GetType(); t != null; t = t.BaseType)
+        {
+            FieldInfo? f = t.GetField(name, Flags) ?? t.GetField($"<{name}>k__BackingField", Flags);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    public static object? Get(object obj, string name) => Field(obj, name)?.GetValue(obj);
+
+    public static bool Set(object obj, string name, object value)
+    {
+        FieldInfo? f = Field(obj, name);
+        if (f == null) return false;
+        f.SetValue(obj, Convert.ChangeType(value, f.FieldType));
+        return true;
+    }
+}
+
+// Identity, career, relationships and health fields on the hero / life.
+public class ProfileFieldHandler : IFieldHandler
+{
+    private static readonly Dictionary<string, string> lifeFields = new()
+    {
+        { "drivinglicense", "DrivingLicense" },
+        { "boatinglicense", "BoatingLicense" },
+        { "pilotslicense", "PilotsLicense" },
+        { "pilothours", "PilotHours" },
+    };
+    private static readonly Dictionary<string, int> genders = new() { { "male", 0 }, { "female", 1 }, { "both", 2 } };
+    private static readonly Dictionary<string, int> sexualities = new() { { "undecided", 0 }, { "hetero", 1 }, { "homo", 2 }, { "bi", 3 } };
+
+    public string[] SupportedFields => new[] {
+        "firstname", "lastname", "gender", "sexuality", "salary", "pension", "respect", "grades", "popularity", "jobperformance", "advisorreputation", "agentreputation", "modelingskill", "actingskill", "dealingskill", "casinopopularity", "casinofunds", "artistpopularity", "zoosupplierquality", "zooperformance", "zoofunds", "zooadmission", "agencyprestige", "spyperformance", "spycover", "cultname", "cultleader", "cultfollowers", "cultreputation", "cultloyalty", "cultjoinfee", "cultannualfee", "pitcrewcompetence", "relationships", "diseases", "addictions"
+    }.Concat(lifeFields.Keys).ToArray();
+
+    public record RosterEntry(string Group, string Role, object Person);
+
+    // everyone shown on the game's Relationships tab, plus your current teachers, classmates and coworkers,
+    // in a stable order (list position = id for `rel`)
+    public static List<RosterEntry> Roster(Life life)
+    {
+        var list = new List<RosterEntry>();
+
+        void Add(string group, string role, object? person)
+        {
+            if (person != null) list.Add(new RosterEntry(group, role, person));
+        }
+
+        void AddAll(string group, string field, string male, string female, string other)
+        {
+            if (Refl.Get(life, field) is not System.Collections.IEnumerable people) return;
+            foreach (object? person in people)
+            {
+                if (person == null) continue;
+                string role = Convert.ToInt32(Refl.Get(person, "Gender") ?? -1) switch { 0 => male, 1 => female, _ => other };
+                Add(group, role, person);
+            }
+        }
+
+        Add("Parents", "Mother", Refl.Get(life, "Mother"));
+        Add("Parents", "Father", Refl.Get(life, "Father"));
+        Add("Partner", "Partner", Refl.Get(life, "Lover"));
+        AddAll("Children", "_ChildArray", "Son", "Daughter", "Child");
+        AddAll("Siblings", "_SiblingArray", "Brother", "Sister", "Sibling");
+        AddAll("Friends", "_FriendArray", "Friend", "Friend", "Friend");
+
+        // professionals you hired: they are people too (same relationship bar)
+        Add("Advisors", "Financial Advisor", Refl.Get(life, "_Portfolio") is object portfolio ? Refl.Get(portfolio, "FinancialAdvisor") : null);
+        Add("Advisors", "Talent Agent", Refl.Get(life, "TalentAgent"));
+
+        // school and work: the current occupation holds the school (teachers, classmates) or the workplace (coworkers)
+        void AddFrom(string group, string role, object? owner, string field)
+        {
+            if (owner == null || Refl.Get(owner, field) is not System.Collections.IEnumerable people) return;
+            foreach (object? person in people)
+                if (person != null) Add(group, role, person);
+        }
+
+        // your casino's regulars: a person each, with the gambling style as their role
+        if (Refl.Get(life, "Casino") is object casino && Refl.Get(casino, "_gamblers") is System.Collections.IEnumerable gamblers)
+            foreach (object? gambler in gamblers)
+                if (gambler != null)
+                {
+                    string style = Refl.Get(gambler, "GamblingStyle")?.ToString() ?? "";
+                    string role = string.Join(' ', style.ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Gamblers", role.Length > 0 ? role : "Gambler", gambler);
+                }
+
+        // zoo staff: people too (role = their job, from the type name: SimZooOperationsManager -> Operations Manager)
+        if (Refl.Get(life, "Zoo") is object zoo && Refl.Get(zoo, "EmployeesList") is System.Collections.IEnumerable staff)
+            foreach (object? member in staff)
+                if (member != null)
+                    Add("Zoo staff", System.Text.RegularExpressions.Regex.Replace(member.GetType().Name.Replace("SimZoo", ""), "(?<=[a-z])(?=[A-Z])", " "), member);
+
+        // your secret agents: people too (role = their rank)
+        if (Refl.Get(life, "SpyAgency") is object agency && Refl.Get(agency, "_agentsList") is System.Collections.IEnumerable agents)
+            foreach (object? agent in agents)
+                if (agent != null)
+                {
+                    string rank = string.Join(' ', (Refl.Get(agent, "Rank")?.ToString() ?? "").ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Agents", rank.Length > 0 ? rank : "Agent", agent);
+                }
+
+        // racing drivers you know: people too (role = their licence)
+        if (Refl.Get(life, "Racing") is object racing && Refl.Get(racing, "_activeDrivers") is System.Collections.IEnumerable drivers)
+            foreach (object? driver in drivers)
+                if (driver != null)
+                {
+                    string lic = string.Join(' ', (Refl.Get(driver, "License")?.ToString() ?? "").ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Racing drivers", lic.Length > 0 ? lic + " driver" : "Driver", driver);
+                }
+
+        // your cult's communards: people too (role = their rank)
+        if (Cult(life) is object cult && Refl.Get(cult, "Plot") is object plot && Refl.Get(plot, "CommunardsList") is System.Collections.IEnumerable communards)
+            foreach (object? member in communards)
+                if (member != null)
+                {
+                    string rank = string.Join(' ', (Refl.Get(member, "Ranking")?.ToString() ?? "").ToLower().Split('_', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => char.ToUpper(w[0]) + w[1..]));
+                    Add("Cult members", rank.Length > 0 ? rank : "Communard", member);
+                }
+
+        Add("Casino staff", "Artist-in-Residence", Refl.Get(life, "Casino") is object cc ? Refl.Get(cc, "_celebrity") : null);
+
+        if (Refl.Get(life, "Occupation") is object occupation)
+        {
+            object? school = Refl.Get(occupation, "School");          // only a student occupation has one
+            AddFrom("Teachers", "Teacher", school, "_TeacherArray");
+            AddFrom("Classmates", "Classmate", school, "_ClassmateArray");
+            AddFrom("Coworkers", "Coworker", Refl.Get(occupation, "_WorkPlace"), "CoworkerArray");
+        }
+        return list;
+    }
+
+    public static string NameOf(object person)
+    {
+        object? name = Refl.Get(person, "Name");
+        return name == null ? "?" : $"{Refl.Get(name, "FirstName")} {Refl.Get(name, "LastName")}".Trim();
+    }
+
+    private static IEnumerable<object> People(Life life) => Roster(life).Select(e => e.Person);
+
+    // your cult: a SimCult hangs off the world place that holds your commune (Life._DeterministicEmigrationPlaceArray[i].Cult)
+    private static object? Cult(Life life) =>
+        Refl.Get(life, "_DeterministicEmigrationPlaceArray") is System.Collections.IEnumerable places
+            ? places.Cast<object?>().Select(pl => pl == null ? null : Refl.Get(pl, "Cult")).FirstOrDefault(c => c != null)
+            : null;
+
+    // the object and field a simple field name lives on (null if the parent doesn't exist, e.g. no job)
+    private static (object? Owner, string Field)? Locate(Life life, string field)
+    {
+        object? hero = life.Hero;
+        return field switch
+        {
+            "firstname" => (hero == null ? null : Refl.Get(hero, "Name"), "FirstName"),
+            "lastname" => (hero == null ? null : Refl.Get(hero, "Name"), "LastName"),
+            "gender" => (hero, "Gender"),
+            "sexuality" => (hero, "Sexuality"),
+            "salary" => (Refl.Get(life, "Occupation"), "Salary"),
+            "pension" => (Refl.Get(life, "Finances"), "Pension"),
+            "respect" => (Refl.Get(life, "Royal"), "Att_respect"),    // only exists while the character is royalty
+            "grades" => (Refl.Get(life, "Occupation"), "Att_grades"),               // only a student occupation has these
+            "popularity" => (Refl.Get(life, "Occupation"), "Att_popularity"),
+            "jobperformance" => (Refl.Get(life, "Occupation"), "Att_performance"),  // only an employee occupation has this
+            "advisorreputation" => (Refl.Get(life, "_Portfolio") is object pf ? Refl.Get(pf, "FinancialAdvisor") : null, "Att_reputation"),
+            "agentreputation" => (Refl.Get(life, "TalentAgent"), "Att_reputation"),
+            // lesson skills: each object only exists once you've taken that kind of lesson
+            "modelingskill" => (Refl.Get(life, "ModelLessonExperience"), "Att_skill"),
+            "actingskill" => (Refl.Get(life, "ActingLessonExperience"), "Att_skill"),
+            "dealingskill" => (Refl.Get(life, "DealingExperience"), "Att_skill"),
+            // your own casino (Life.Casino exists only while you own one)
+            "casinopopularity" => (Refl.Get(life, "Casino"), "_popularity"),
+            "casinofunds" => (Refl.Get(life, "Casino"), "BankBalance"),             // "Available Funds" on its profile
+            // your zoo (Life.Zoo exists only while you own one)
+            "zoosupplierquality" => (Refl.Get(life, "Zoo") is object zs ? Refl.Get(zs, "Supplier") : null, "QualityLevel"),    // "Animal Food Supplier: Quality"
+            "zooperformance" => (Refl.Get(life, "Zoo"), "_baselineHeroPerformanceScore"),   // one input to "You (Owner): Performance"; the game adds other factors, so the bar may not follow it one-for-one
+            "zoofunds" => (Refl.Get(life, "Zoo"), "BankBalance"),
+            "zooadmission" => (Refl.Get(life, "Zoo"), "AdmissionFee"),
+            // your secret agency (Life.SpyAgency exists only while you run one)
+            "agencyprestige" => (Refl.Get(life, "SpyAgency"), "Prestige"),
+            "spyperformance" => (Refl.Get(life, "SpyAgency"), "HeroPerformanceIndex"),   // one input to "You (Spymaster): Performance": tested 0 -> bar ~10%, 50 and 100 -> ~40% (other factors cap it); Missions Success Rate is unaffected
+            "spycover" => (Refl.Get(life, "SpyAgency") is object sy ? Refl.Get(sy, "Front") : null, "Location"),   // the front business's "Cover" bar
+            // your racing pit crew (Life.Racing.PitCrew exists once you hired one)
+            "pitcrewcompetence" => (Refl.Get(life, "Racing") is object rc ? Refl.Get(rc, "PitCrew") : null, "Competence"),
+            // your cult (exists only once you founded one)
+            "cultname" => (Cult(life), "Name"),
+            "cultleader" => (Cult(life), "LeaderHonorificName"),
+            "cultfollowers" => (Cult(life), "Followers"),
+            "cultreputation" => (Cult(life), "Reputation"),
+            "cultloyalty" => (Cult(life) is object cl ? Refl.Get(cl, "Plot") : null, "FollowerLoyalty"),   // the commune's "Follower Loyalty"
+            "cultjoinfee" => (Cult(life), "InitialMembershipFee"),
+            "cultannualfee" => (Cult(life), "AnnualMembershipFee"),
+            "artistpopularity" => (Refl.Get(life, "Casino") is object cz ? Refl.Get(cz, "_celebrity") : null, "_popularity"),   // the Artist-in-Residence
+            _ when lifeFields.TryGetValue(field, out string? name) => (life, name),
+            _ => null,
+        };
+    }
+
+    public bool TryGetField(ReplContext context, string fieldName, out object? value)
+    {
+        value = null;
+        Life life = context.SaveData;
+        fieldName = fieldName.ToLower();
+
+        switch (fieldName)
+        {
+            case "relationships":
+                var strengths = People(life).Select(p => Convert.ToDouble(Refl.Get(p, "HeroRelationshipStrength") ?? 0)).ToList();
+                if (strengths.Count == 0) return false;
+                value = Math.Round(strengths.Average());
+                return true;
+            case "diseases":
+            case "addictions":
+                value = (Refl.Get(life, fieldName == "diseases" ? "DiseaseArray" : "AddictionArray") as System.Collections.IList)?.Count;
+                return value != null;
+        }
+
+        var loc = Locate(life, fieldName);
+        if (loc?.Owner == null) return false;
+        value = Refl.Get(loc.Value.Owner!, loc.Value.Field);
+        return value != null;
+    }
+
+    public bool TrySetField(ReplContext context, string fieldName, object value)
+    {
+        Life life = context.SaveData;
+        fieldName = fieldName.ToLower();
+
+        switch (fieldName)
+        {
+            case "relationships":
+                float strength = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+                int count = 0;
+                foreach (object person in People(life))
+                    if (Refl.Set(person, "HeroRelationshipStrength", strength)) count++;
+                return count > 0;
+            case "diseases":
+            case "addictions":
+                var list = Refl.Get(life, fieldName == "diseases" ? "DiseaseArray" : "AddictionArray") as System.Collections.IList;
+                if (list == null) return false;
+                list.Clear();
+                return true;
+        }
+
+        var loc = Locate(life, fieldName);
+        if (loc?.Owner == null) return false;
+
+        if (value is string text)
+        {
+            if (fieldName == "gender" && genders.TryGetValue(text.ToLower(), out int g)) value = g;
+            else if (fieldName == "sexuality" && sexualities.TryGetValue(text.ToLower(), out int x)) value = x;
+        }
+
+        if (fieldName is "respect" or "grades" or "popularity" or "jobperformance" or "advisorreputation" or "agentreputation" or "modelingskill" or "actingskill" or "dealingskill" or "casinopopularity" or "artistpopularity" or "zoosupplierquality" or "zooperformance" or "agencyprestige" or "spyperformance" or "spycover" or "cultreputation" or "cultloyalty" or "pitcrewcompetence") value = Math.Clamp(Convert.ToSingle(value), 0f, 100f);
+        if (fieldName == "cultfollowers") value = Math.Clamp(Convert.ToInt64(value), 0L, 2_000_000_000L);
+        if (fieldName is "casinofunds" or "zoofunds" or "zooadmission" or "cultjoinfee" or "cultannualfee") value = Math.Max(Convert.ToDouble(value), 0d);
+
+        // the name object keeps a second copy of the first name
+        if (fieldName == "firstname") Refl.Set(loc.Value.Owner!, "firstName", value);
+
+        return Refl.Set(loc.Value.Owner!, loc.Value.Field, value);
+    }
+
+    public string GetDescription(string fieldName) => "Identity, career, relationships or health field";
+}
 
 public interface IReplCommand
 {
@@ -1051,7 +1374,7 @@ public class SetCommand : IReplCommand
         }
 
         string fieldName = args[0].ToLower();
-        string valueStr = args[1];
+        string valueStr = string.Join(' ', args.Skip(1));
 
         if (TryParseValue(valueStr, out object? value) && value != null)
         {
@@ -1137,7 +1460,7 @@ public class SaveCommand : IReplCommand
         {
             using MemoryStream memoryStream = new();
 #pragma warning disable SYSLIB0011
-            BinaryFormatter binaryFormatter = new();
+            BinaryFormatter binaryFormatter = new() { Binder = new MonoSerializationBinder() };
             binaryFormatter.Serialize(memoryStream, context.SaveData);
 #pragma warning restore SYSLIB0011
 
@@ -1162,6 +1485,18 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Available commands:");
         Console.WriteLine("  set <field> <value> - Set a field to a specific value");
         Console.WriteLine("  get <field>         - Get the current value of a field");
+        Console.WriteLine("  people              - List family, partner, friends, teachers, classmates and coworkers with their relationship strength");
+        Console.WriteLine("  rel <id> <0-100> <full name> - Set one person's relationship strength");
+        Console.WriteLine("  activities          - List school activities (teams, clubs) with their performance");
+        Console.WriteLine("  act <id> <0-100> <activity name> - Set one activity's performance");
+        Console.WriteLine("  instruments         - List instruments (voice lessons too) with their skill");
+        Console.WriteLine("  instr <id> <0-100> <instrument name> - Set one instrument's skill");
+        Console.WriteLine("  items <kind>        - List items with a 0-100 stat: casinoacts, casinorooms, zoohabitats, zoofeatures,");
+        Console.WriteLine("                        zooattractions, zooemployees, zoohealthbuff (animals), spyagents, spygadgets, spysecurity,");
+        Console.WriteLine("                        luxurycharities, luxuryislands, racingdrivers, racingspeed, racingacceleration, racinghandling, racingdurability");
+        Console.WriteLine("  setitem <kind> <id> <0-100> <name> - Set one of them");
+        Console.WriteLine("  assets              - List the portfolio's stock and crypto holdings");
+        Console.WriteLine("  setasset <id> <quantity> <name> - Set how much of one you hold (cost basis follows)");
         Console.WriteLine("  save [filename]     - Save changes to file");
         Console.WriteLine("  help                - Show this help message");
         Console.WriteLine("  quit/exit           - Exit the REPL");
@@ -1169,14 +1504,438 @@ public class HelpCommand : IReplCommand
         Console.WriteLine("Supported fields:");
         Console.WriteLine("  money, cash, bank, balance - Character's money");
         Console.WriteLine("  age                        - Character's age");
+        Console.WriteLine("  happiness, health          - Main stats (0-100)");
+        Console.WriteLine("  smarts, looks              - Main stats (0-100)");
+        Console.WriteLine("  stats                      - Set/get happiness, health, smarts and looks together");
+        Console.WriteLine("  firstname, lastname        - Character's name");
+        Console.WriteLine("  gender (0-2), sexuality (0-3) - Identity; names also work (male/female/both, hetero/homo/bi)");
+        Console.WriteLine("  salary, pension            - Job salary (needs a job) and pension");
+        Console.WriteLine("  respect                    - Royal respect (0-100); only while the character is royalty");
+        Console.WriteLine("  grades, popularity         - School stats (0-100); only while in school");
+        Console.WriteLine("  jobperformance             - Job performance (0-100); only while employed");
+        Console.WriteLine("  advisorreputation, agentreputation - Reputation of your financial advisor / talent agent (0-100)");
+        Console.WriteLine("  modelingskill, actingskill, dealingskill - Lesson/experience skill (0-100); once you have taken them");
+        Console.WriteLine("  casinopopularity (0-100), casinofunds - Your casino's Popularity and Available Funds; only while you own one");
+        Console.WriteLine("  artistpopularity           - Popularity of your casino's Artist-in-Residence (0-100)");
+        Console.WriteLine("  zoosupplierquality, zooperformance (0-100), zoofunds, zooadmission - Your zoo; only while you own one (zooperformance is one input to your Performance bar, not the whole bar)");
+        Console.WriteLine("  pitcrewcompetence (0-100) - Your racing pit crew; only once you hired one");
+        Console.WriteLine("  cultname, cultleader, cultfollowers, cultreputation (0-100), cultloyalty (0-100), cultjoinfee, cultannualfee - Your cult; only once you founded one");
+        Console.WriteLine("  agencyprestige, spyperformance, spycover (0-100) - Your secret agency's Prestige, an input to your Performance bar (it stops mattering around 50) and its front's Cover");
+        Console.WriteLine("  drivinglicense, boatinglicense, pilotslicense (true/false), pilothours");
+        Console.WriteLine("  relationships              - Relationship strength of family, friends and lover (0-100)");
+        Console.WriteLine("  diseases, addictions       - get: count; set <any>: cure them all");
+        Console.WriteLine("  karma, fame, discipline, willpower, ... (see source) - Other attributes (0-100)");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  set money 99999     - Set money to 99,999");
         Console.WriteLine("  get age             - Get the character's age");
         Console.WriteLine("  set age 912         - If you're feeling like Seth");
+        Console.WriteLine("  set stats 100       - Max out happiness, health, smarts and looks");
+        Console.WriteLine("  set looks 50        - Set looks to 50%");
     }
 
     public string GetHelp() => "help - Show available commands";
+}
+
+// the activities the hero is in at the current school (teams, clubs, ...): each has its own Performance
+public static class SchoolActivities
+{
+    public static List<object> List(Life life)
+    {
+        var result = new List<object>();
+        object? school = Refl.Get(life, "Occupation") is object occ ? Refl.Get(occ, "School") : null;
+        if (school != null && Refl.Get(school, "_HeroActivityArray") is System.Collections.IEnumerable items)
+            foreach (object? a in items)
+                if (a != null) result.Add(a);
+        return result;
+    }
+
+    public static string NameOf(object activity) => Refl.Get(activity, "ActivityName")?.ToString() ?? "?";
+}
+
+public class ActivitiesCommand : IReplCommand
+{
+    // one line per activity: activity|<id>|<name>|<status>|<performance>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var list = SchoolActivities.List(context.SaveData);
+        for (int i = 0; i < list.Count; i++)
+        {
+            double perf = Math.Round(Convert.ToDouble(Refl.Get(list[i], "Att_performance") ?? 0));
+            Console.WriteLine($"activity|{i}|{SchoolActivities.NameOf(list[i])}|{Refl.Get(list[i], "Status") ?? 0}|{perf}");
+        }
+        if (list.Count == 0) Console.WriteLine("No school activities found.");
+    }
+
+    public string GetHelp() => "activities - List the school activities (teams, clubs) with their performance";
+}
+
+public class ActCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !float.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine("Usage: act <id> <0-100> <activity name>   (ids and names come from 'activities')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(2));
+        var list = SchoolActivities.List(context.SaveData);
+
+        object? activity = null;
+        if (index >= 0 && index < list.Count && SchoolActivities.NameOf(list[index]) == name) activity = list[index];
+        else
+        {
+            var matches = list.Where(a => SchoolActivities.NameOf(a) == name).ToList();
+            if (matches.Count == 1) activity = matches[0];
+        }
+
+        if (activity == null)
+        {
+            Console.WriteLine($"Could not set activity: {name}");
+            return;
+        }
+
+        float v = Math.Clamp(value, 0f, 100f);
+        Refl.Set(activity, "Att_performance", v);
+        Console.WriteLine($"Set performance of {name} to: {v}");
+    }
+
+    public string GetHelp() => "act <id> <0-100> <activity name> - Set one school activity's performance";
+}
+
+// the musical instruments you play (voice lessons count as an instrument called "voice"), each with a Skill
+public static class Instruments
+{
+    public static List<object> List(Life life)
+    {
+        var result = new List<object>();
+        if (Refl.Get(life, "_InstrumentArray") is System.Collections.IEnumerable items)
+            foreach (object? i in items)
+                if (i != null) result.Add(i);
+        return result;
+    }
+
+    public static string NameOf(object instrument) => Refl.Get(instrument, "InstrumentName")?.ToString() ?? "?";
+}
+
+public class InstrumentsCommand : IReplCommand
+{
+    // one line per instrument: instrument|<id>|<name>|<skill>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var list = Instruments.List(context.SaveData);
+        for (int i = 0; i < list.Count; i++)
+            Console.WriteLine($"instrument|{i}|{Instruments.NameOf(list[i])}|{Math.Round(Convert.ToDouble(Refl.Get(list[i], "Att_skill") ?? 0))}");
+        if (list.Count == 0) Console.WriteLine("No instruments found.");
+    }
+
+    public string GetHelp() => "instruments - List the instruments (and voice lessons) with their skill";
+}
+
+public class InstrCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !float.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine("Usage: instr <id> <0-100> <instrument name>   (ids and names come from 'instruments')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(2));
+        var list = Instruments.List(context.SaveData);
+
+        object? instrument = null;
+        if (index >= 0 && index < list.Count && Instruments.NameOf(list[index]) == name) instrument = list[index];
+        else
+        {
+            var matches = list.Where(i => Instruments.NameOf(i) == name).ToList();
+            if (matches.Count == 1) instrument = matches[0];
+        }
+
+        if (instrument == null)
+        {
+            Console.WriteLine($"Could not set instrument: {name}");
+            return;
+        }
+
+        float v = Math.Clamp(value, 0f, 100f);
+        Refl.Set(instrument, "Att_skill", v);
+        Console.WriteLine($"Set skill of {name} to: {v}");
+    }
+
+    public string GetHelp() => "instr <id> <0-100> <instrument name> - Set one instrument's skill";
+}
+
+// A "kind" is a list of named things on the save that each carry one 0-100 stat. New kinds are one table row.
+//   Source: the items. Name: how an item is labelled and matched. Owner: the object holding the stat (the item itself, or
+//   something inside it; null = this item has none and is skipped, so ids stay aligned). ValueField: the stat.
+public static class ItemLists
+{
+    public record Kind(Func<Life, System.Collections.IEnumerable?> Source, Func<object, string> Name, Func<object, object?> Owner, string ValueField);
+
+    private static string Str(object o, string field) => Refl.Get(o, field)?.ToString() ?? "?";
+
+    private static string PersonName(object p) =>
+        Refl.Get(p, "Name") is object n ? $"{Refl.Get(n, "FirstName")} {Refl.Get(n, "LastName")}".Trim() : "?";
+
+    private static object? Self(object o) => o;
+
+    private static System.Collections.IEnumerable? In(object? owner, string field) =>
+        owner == null ? null : Refl.Get(owner, field) as System.Collections.IEnumerable;
+
+    private static System.Collections.IEnumerable? Casino(Life life, string field) => In(Refl.Get(life, "Casino"), field);
+    private static System.Collections.IEnumerable? Zoo(Life life, string field) => In(Refl.Get(life, "Zoo"), field);
+    private static System.Collections.IEnumerable? Spy(Life life, string field) => In(Refl.Get(life, "SpyAgency"), field);
+    private static System.Collections.IEnumerable? Luxury(Life life, string field) => In(Refl.Get(life, "Luxury"), field);
+    private static System.Collections.IEnumerable? Racing(Life life, string field) => In(Refl.Get(life, "Racing"), field);
+
+    // the race cars in your garage (a SimRaceCar wraps the SimCar, which holds the make, model and the racing stats)
+    private static System.Collections.IEnumerable? GarageCars(Life life) =>
+        In(Refl.Get(life, "Racing") is object r ? Refl.Get(r, "Garage") : null, "_raceCars");
+    private static object? CarDetails(object raceCar) => Refl.Get(raceCar, "_simCar") is object car ? Refl.Get(car, "RaceCarDetails") : null;
+    private static string CarName(object raceCar) =>
+        Refl.Get(raceCar, "_simCar") is object car ? $"{Str(car, "_Make")} {Str(car, "_Model")}".Trim() : "?";
+
+    // every animal in every habitat
+    private static System.Collections.IEnumerable? ZooAnimals(Life life)
+    {
+        var animals = new List<object>();
+        if (Zoo(life, "HabitatsList") is System.Collections.IEnumerable habitats)
+            foreach (object? h in habitats)
+                if (In(h, "AnimalsList") is System.Collections.IEnumerable list)
+                    foreach (object? a in list)
+                        if (a != null) animals.Add(a);
+        return animals;
+    }
+
+    public static readonly Dictionary<string, Kind> Kinds = new()
+    {
+        ["casinoacts"] = new(l => Casino(l, "_entertainmentActs"), o => Str(o, "Name"), Self, "_popularity"),
+        ["casinorooms"] = new(l => Casino(l, "_gameRooms"), o => Str(o, "Name"), Self, "_popularity"),
+        ["zoohabitats"] = new(l => Zoo(l, "HabitatsList"), o => Str(o, "Name"), Self, "CleanCondition"),
+        ["zoofeatures"] = new(l => Zoo(l, "HabitatsList"), o => Str(o, "Name"), o => Refl.Get(o, "Feature"), "_condition"),
+        ["zooattractions"] = new(l => Zoo(l, "AttractionsList"), o => Str(o, "Type"), Self, "_engagementScore"),
+        ["zooemployees"] = new(l => Zoo(l, "EmployeesList"), PersonName, Self, "Att_competence"),
+        ["spyagents"] = new(l => Spy(l, "_agentsList"), PersonName, Self, "Proficiency"),           // each agent's proficiency
+        ["spygadgets"] = new(l => Spy(l, "GadgetsList"), o => Str(o, "Name"), Self, "Condition"),
+        ["spysecurity"] = new(l => Spy(l, "SecurityFeaturesList"), o => Str(o, "Name"), Self, "Condition"),
+        ["luxurycharities"] = new(l => Luxury(l, "_charities"), o => Str(o, "Name"), Self, "_reputation"),
+        ["luxuryislands"] = new(l => Luxury(l, "_ownedIslands"), o => Str(o, "Name"), o => Refl.Get(o, "Structure"), "_condition"),   // the island's structure
+        ["racingdrivers"] = new(l => Racing(l, "_activeDrivers"), PersonName, Self, "_skill"),
+        ["racingspeed"] = new(GarageCars, CarName, CarDetails, "_baseSpeed"),
+        ["racingacceleration"] = new(GarageCars, CarName, CarDetails, "_baseAcceleration"),
+        ["racinghandling"] = new(GarageCars, CarName, CarDetails, "_baseHandling"),
+        ["racingdurability"] = new(GarageCars, CarName, CarDetails, "_baseDurability"),
+        ["zoohealthbuff"] = new(ZooAnimals, o => Str(o, "Name"), Self, "_healthBuff"),     // each animal's health buff
+    };
+
+    public static List<object> List(Life life, Kind kind)
+    {
+        var result = new List<object>();
+        if (kind.Source(life) is System.Collections.IEnumerable items)
+            foreach (object? i in items)
+                if (i != null && kind.Owner(i) != null) result.Add(i);
+        return result;
+    }
+
+    public static double ValueOf(object item, Kind kind) => Convert.ToDouble(Refl.Get(kind.Owner(item)!, kind.ValueField) ?? 0);
+}
+
+public class ItemsCommand : IReplCommand
+{
+    // items <kind>  ->  one line per item: item|<kind>|<id>|<name>|<value>
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 1 || !ItemLists.Kinds.TryGetValue(args[0].ToLower(), out var kind))
+        {
+            Console.WriteLine($"Usage: items <{string.Join('|', ItemLists.Kinds.Keys)}>");
+            return;
+        }
+
+        var list = ItemLists.List(context.SaveData, kind);
+        for (int i = 0; i < list.Count; i++)
+            Console.WriteLine($"item|{args[0].ToLower()}|{i}|{kind.Name(list[i])}|{Math.Round(ItemLists.ValueOf(list[i], kind))}");
+        if (list.Count == 0) Console.WriteLine($"No {args[0]} found.");
+    }
+
+    public string GetHelp() => "items <kind> - List the items of a kind (casinoacts, casinorooms, zoohabitats, ...) with their stat";
+}
+
+public class SetItemCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 4
+            || !ItemLists.Kinds.TryGetValue(args[0].ToLower(), out var kind)
+            || !int.TryParse(args[1], out int index)
+            || !float.TryParse(args[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine($"Usage: setitem <{string.Join('|', ItemLists.Kinds.Keys)}> <id> <0-100> <name>   (ids and names come from 'items')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(3));
+        var list = ItemLists.List(context.SaveData, kind);
+
+        object? item = null;
+        if (index >= 0 && index < list.Count && kind.Name(list[index]) == name) item = list[index];
+        else
+        {
+            var matches = list.Where(x => kind.Name(x) == name).ToList();
+            if (matches.Count == 1) item = matches[0];
+        }
+
+        if (item == null)
+        {
+            Console.WriteLine($"Could not set item: {name}");
+            return;
+        }
+
+        float v = Math.Clamp(value, 0f, 100f);
+        Refl.Set(kind.Owner(item)!, kind.ValueField, v);
+        Console.WriteLine($"Set {args[0].ToLower()} {name} to: {v}");
+    }
+
+    public string GetHelp() => "setitem <kind> <id> <0-100> <name> - Set one item's stat";
+}
+
+// the portfolio's stocks and crypto: the game values a holding at (quantity x market price), so the quantity is the lever
+public static class Holdings
+{
+    public static List<object> List(Life life)
+    {
+        var result = new List<object>();
+        if (Refl.Get(life, "_Portfolio") is object portfolio && Refl.Get(portfolio, "Assets") is System.Collections.IEnumerable assets)
+            foreach (object? a in assets)
+                if (a != null && Convert.ToInt32(Refl.Get(a, "AssetType") ?? 0) is 1 or 2) result.Add(a);   // 1 = stock, 2 = crypto
+        return result;
+    }
+
+    public static string NameOf(object holding) => Refl.Get(holding, "Name")?.ToString() ?? "?";
+    public static string Num(double v) => v.ToString("0.############", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+public class AssetsCommand : IReplCommand
+{
+    // one line per holding: asset|<id>|<name>|<type>|<quantity>|<average cost per unit>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var list = Holdings.List(context.SaveData);
+        for (int i = 0; i < list.Count; i++)
+            Console.WriteLine($"asset|{i}|{Holdings.NameOf(list[i])}|{Refl.Get(list[i], "AssetType")}|{Holdings.Num(Convert.ToDouble(Refl.Get(list[i], "Quantity") ?? 0))}|{Holdings.Num(Convert.ToDouble(Refl.Get(list[i], "AverageCost") ?? 0))}");
+        if (list.Count == 0) Console.WriteLine("No stock or crypto holdings found.");
+    }
+
+    public string GetHelp() => "assets - List the portfolio's stock and crypto holdings (name, type, quantity, average cost)";
+}
+
+public class SetAssetCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !double.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double quantity)
+            || double.IsNaN(quantity) || double.IsInfinity(quantity))
+        {
+            Console.WriteLine("Usage: setasset <id> <quantity> <name>   (ids and names come from 'assets')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look it up by name
+        string name = string.Join(' ', args.Skip(2));
+        var list = Holdings.List(context.SaveData);
+
+        object? holding = null;
+        if (index >= 0 && index < list.Count && Holdings.NameOf(list[index]) == name) holding = list[index];
+        else
+        {
+            var matches = list.Where(h => Holdings.NameOf(h) == name).ToList();
+            if (matches.Count == 1) holding = matches[0];
+        }
+
+        if (holding == null)
+        {
+            Console.WriteLine($"Could not set holding: {name}");
+            return;
+        }
+
+        quantity = Math.Clamp(quantity, 0d, 1e15);
+        Refl.Set(holding, "Quantity", quantity);
+        // keep the cost basis consistent, as if you had bought that many at your average price (no phantom gain to tax)
+        Refl.Set(holding, "TotalUntaxedInvestment", quantity * Convert.ToDouble(Refl.Get(holding, "AverageCost") ?? 0));
+        Console.WriteLine($"Set holding {name} to: {Holdings.Num(quantity)}");
+    }
+
+    public string GetHelp() => "setasset <id> <quantity> <name> - Set how much of a stock or crypto you hold";
+}
+
+public class PeopleCommand : IReplCommand
+{
+    // one line per person: person|<id>|<group>|<role>|<name>|<strength>|<alive>
+    public void Execute(ReplContext context, string[] args)
+    {
+        var roster = ProfileFieldHandler.Roster(context.SaveData);
+        for (int i = 0; i < roster.Count; i++)
+        {
+            object person = roster[i].Person;
+            double strength = Math.Round(Convert.ToDouble(Refl.Get(person, "HeroRelationshipStrength") ?? 0));
+            Console.WriteLine($"person|{i}|{roster[i].Group}|{roster[i].Role}|{ProfileFieldHandler.NameOf(person)}|{strength}|{Refl.Get(person, "Alive") ?? true}");
+        }
+        if (roster.Count == 0) Console.WriteLine("No relationships found.");
+    }
+
+    public string GetHelp() => "people - List family, partner and friends with their relationship strength";
+}
+
+public class RelCommand : IReplCommand
+{
+    public void Execute(ReplContext context, string[] args)
+    {
+        if (args.Length < 3
+            || !int.TryParse(args[0], out int index)
+            || !float.TryParse(args[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Console.WriteLine("Usage: rel <id> <0-100> <full name>   (ids and names come from 'people')");
+            return;
+        }
+
+        // the name guards against a stale id: if the list changed since the id was read, look the person up by name
+        string name = string.Join(' ', args.Skip(2));
+        var roster = ProfileFieldHandler.Roster(context.SaveData);
+
+        object? person = null;
+        if (index >= 0 && index < roster.Count && ProfileFieldHandler.NameOf(roster[index].Person) == name)
+        {
+            person = roster[index].Person;
+        }
+        else
+        {
+            var matches = roster.Where(e => ProfileFieldHandler.NameOf(e.Person) == name).ToList();
+            if (matches.Count == 1) person = matches[0].Person;
+        }
+
+        if (person == null)
+        {
+            Console.WriteLine($"Could not set relationship: {name}");
+            return;
+        }
+
+        Refl.Set(person, "HeroRelationshipStrength", Math.Clamp(value, 0f, 100f));
+        Console.WriteLine($"Set relationship of {name} to: {Math.Clamp(value, 0f, 100f)}");
+    }
+
+    public string GetHelp() => "rel <id> <0-100> <full name> - Set one person's relationship strength";
 }
 
 public class QuitCommand : IReplCommand
@@ -1335,3 +2094,34 @@ public class QuitCommand : IReplCommand
 //     }
 // }
 // #pragma warning restore SYSLIB0050
+
+// Mono serializes string-keyed dictionaries with its internal comparer, which .NET lacks.
+// Read it as a local stand-in and write it back under the Mono name so the game still accepts the save.
+[Serializable]
+public sealed class InternalStringComparer : EqualityComparer<string>
+{
+    public override bool Equals(string? x, string? y) => string.Equals(x, y, StringComparison.Ordinal);
+    public override int GetHashCode(string obj) => obj.GetHashCode();
+}
+
+public class MonoSerializationBinder : SerializationBinder
+{
+    private const string MonoComparerName = "System.Collections.Generic.InternalStringComparer";
+    private const string MonoCorlib = "mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089";
+
+    public override Type? BindToType(string assemblyName, string typeName) =>
+        typeName == MonoComparerName ? typeof(InternalStringComparer) : null;
+
+    public override void BindToName(Type serializedType, out string? assemblyName, out string? typeName)
+    {
+        if (serializedType == typeof(InternalStringComparer))
+        {
+            assemblyName = MonoCorlib;
+            typeName = MonoComparerName;
+        }
+        else
+        {
+            base.BindToName(serializedType, out assemblyName, out typeName);
+        }
+    }
+}
